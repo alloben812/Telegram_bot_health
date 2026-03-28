@@ -3,8 +3,9 @@ Sync handler — pulls data from Garmin and WHOOP,
 stores it in the database, and shows a summary.
 """
 
+from __future__ import annotations
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 
 from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
@@ -87,11 +88,15 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 recovery = await wc.get_latest_recovery()
                 sleep = await wc.get_latest_sleep()
                 cycle = await wc.get_latest_cycle()
-                whoop_data = {
-                    "recovery": recovery or {},
-                    "sleep": sleep or {},
-                    "cycle": cycle or {},
-                }
+
+                if recovery or sleep or cycle:
+                    whoop_data = {
+                        "recovery": recovery or {},
+                        "sleep": sleep or {},
+                        "cycle": cycle or {},
+                    }
+                else:
+                    errors.append("💍 WHOOP: данных пока нет (устройство не синхронизировалось?)")
             except Exception as exc:
                 logger.error("WHOOP sync error: %s", exc)
                 errors.append(f"💍 WHOOP: {exc}")
@@ -136,6 +141,18 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         strain = cycle.get("strain", "—")
         sleep_perf = sl.get("sleep_performance_percentage", "—")
 
+        # Round numeric values for display
+        if isinstance(hrv, float):
+            hrv = round(hrv, 1)
+        if isinstance(rhr, float):
+            rhr = round(rhr, 1)
+        if isinstance(strain, float):
+            strain = round(strain, 1)
+        if isinstance(recovery_pct, float):
+            recovery_pct = round(recovery_pct, 1)
+        if isinstance(sleep_perf, float):
+            sleep_perf = round(sleep_perf, 1)
+
         # Recovery emoji
         if isinstance(recovery_pct, (int, float)):
             emoji = "🟢" if recovery_pct >= 67 else ("🟡" if recovery_pct >= 34 else "🔴")
@@ -163,5 +180,107 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
 
 
+async def sync_whoop_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Pull last 30 days of WHOOP data and create a DailySnapshot per day."""
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    user = await get_user(user_id)
+
+    if not user:
+        await query.edit_message_text("❌ Пользователь не найден. Введи /start")
+        return
+
+    whoop_token = get_whoop_token(user) if user.whoop_token_enc else None
+    if not whoop_token:
+        await query.edit_message_text("💍 WHOOP не авторизован. Подключи через ⚙️ Настройки.")
+        return
+
+    await query.edit_message_text("⏳ Загружаю историю WHOOP за 30 дней…")
+
+    try:
+        from integrations.whoop import WhoopClient
+        from datetime import timedelta
+        wc = WhoopClient(user_id)
+        wc.load_token(whoop_token)
+
+        end_dt = datetime.now(tz=timezone.utc)
+        start_dt = end_dt - timedelta(days=30)
+
+        recoveries = await wc.get_recovery_collection(start_date=start_dt, end_date=end_dt)
+        sleeps = await wc.get_sleep_collection(limit=25)
+        cycles = await wc.get_cycle_collection(limit=25)
+        workouts = await wc.get_workout_collection(limit=25)
+
+        def _date_str(ts: str) -> str:
+            """Extract YYYY-MM-DD from an ISO timestamp string."""
+            try:
+                return datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(timezone.utc).strftime("%Y-%m-%d")
+            except Exception:
+                return ts[:10]
+
+        # Index by date
+        recovery_by_date: dict[str, dict] = {}
+        for r in recoveries:
+            ts = r.get("created_at") or r.get("updated_at") or ""
+            if ts:
+                recovery_by_date[_date_str(ts)] = r
+
+        sleep_by_date: dict[str, dict] = {}
+        for s in sleeps:
+            ts = s.get("end") or s.get("start") or ""
+            if ts:
+                sleep_by_date[_date_str(ts)] = s
+
+        cycle_by_date: dict[str, dict] = {}
+        for c in cycles:
+            ts = c.get("start") or ""
+            if ts:
+                cycle_by_date[_date_str(ts)] = c
+
+        workout_by_date: dict[str, list] = {}
+        for w in workouts:
+            ts = w.get("start") or ""
+            if ts:
+                d = _date_str(ts)
+                workout_by_date.setdefault(d, []).append(w)
+
+        all_dates = sorted(
+            set(recovery_by_date) | set(sleep_by_date) | set(cycle_by_date) | set(workout_by_date),
+            reverse=True,
+        )
+
+        saved = 0
+        for day in all_dates:
+            whoop_data = {
+                "recovery": recovery_by_date.get(day, {}),
+                "sleep": sleep_by_date.get(day, {}),
+                "cycle": cycle_by_date.get(day, {}),
+                "workouts": workout_by_date.get(day, []),
+            }
+            await upsert_daily_snapshot(
+                user_id=user_id,
+                snapshot_date=day,
+                whoop_data=whoop_data,
+            )
+            saved += 1
+
+        await query.edit_message_text(
+            f"✅ История WHOOP загружена: {saved} дней сохранено в базе.\n\n"
+            "Теперь 📊 Статистика покажет исторические данные.",
+            reply_markup=SYNC_KB,
+        )
+
+    except Exception as exc:
+        logger.error("WHOOP history sync error: %s", exc)
+        await query.edit_message_text(
+            f"❌ Ошибка загрузки истории WHOOP: {exc}",
+            reply_markup=SYNC_KB,
+        )
+
+
 def get_sync_handlers() -> list:
-    return [CallbackQueryHandler(sync_callback, pattern=r"^sync:")]
+    return [
+        CallbackQueryHandler(sync_whoop_history, pattern=r"^sync:whoop_history$"),
+        CallbackQueryHandler(sync_callback, pattern=r"^sync:"),
+    ]

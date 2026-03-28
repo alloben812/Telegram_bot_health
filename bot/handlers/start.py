@@ -2,9 +2,10 @@
 /start command and settings handlers.
 """
 
+from __future__ import annotations
 import logging
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     CallbackQueryHandler,
     CommandHandler,
@@ -74,11 +75,16 @@ async def settings_callback(
         from integrations.whoop import WhoopClient
         client = WhoopClient(update.effective_user.id)
         auth_url = client.get_auth_url()
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔗 Авторизоваться в WHOOP", url=auth_url)
+        ]])
         await query.edit_message_text(
             "💍 *Подключение WHOOP*\n\n"
-            f"Перейди по ссылке для авторизации:\n{auth_url}\n\n"
-            "После авторизации отправь мне код командой `/whoop_code <КОД>`",
-            parse_mode="Markdown",
+            "Нажми кнопку ниже для авторизации\\.\n\n"
+            "После авторизации скопируй код из адресной строки браузера "
+            "и отправь боту: `/whoop_code КОД`",
+            parse_mode="MarkdownV2",
+            reply_markup=keyboard,
         )
         return None
 

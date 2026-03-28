@@ -39,7 +39,6 @@ class Config:
             "TELEGRAM_BOT_TOKEN": self.TELEGRAM_BOT_TOKEN,
             "ADMIN_TELEGRAM_ID": self.ADMIN_TELEGRAM_ID,
             "SECRET_KEY": self.SECRET_KEY,
-            "ANTHROPIC_API_KEY": self.ANTHROPIC_API_KEY,
         }
         missing = [k for k, v in required.items() if not v]
         if missing:

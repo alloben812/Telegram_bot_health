@@ -5,6 +5,7 @@ Uses the garminconnect library to fetch activities, sleep,
 training load, and VO2max from Garmin Connect.
 """
 
+from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, timedelta

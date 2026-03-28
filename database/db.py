@@ -4,8 +4,10 @@ Sensitive fields are transparently encrypted/decrypted via security.py.
 Callers always work with plaintext values — encryption is an internal detail.
 """
 
+from __future__ import annotations
 import logging
 from datetime import datetime
+from sqlalchemy import text
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.future import select
@@ -21,9 +23,29 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
 async def init_db() -> None:
-    """Create all tables if they don't exist."""
+    """Create all tables if they don't exist, and migrate new columns."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Add new columns to existing tables (safe to run multiple times)
+    new_columns = [
+        ("daily_snapshots", "whoop_avg_hr", "INTEGER"),
+        ("daily_snapshots", "whoop_max_hr", "INTEGER"),
+        ("daily_snapshots", "whoop_kilojoule", "FLOAT"),
+        ("daily_snapshots", "whoop_respiratory_rate", "FLOAT"),
+        ("daily_snapshots", "whoop_spo2", "FLOAT"),
+        ("daily_snapshots", "whoop_skin_temp", "FLOAT"),
+        ("daily_snapshots", "whoop_workout_count", "INTEGER"),
+    ]
+    async with engine.begin() as conn:
+        for table, col, col_type in new_columns:
+            try:
+                await conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                )
+            except Exception:
+                pass  # Column already exists
+
     logger.info("Database initialised")
 
 
@@ -122,18 +144,30 @@ async def upsert_daily_snapshot(
             sleep = whoop_data.get("sleep", {})
             sleep_score = sleep.get("score", {})
             cycle = whoop_data.get("cycle", {})
+            cycle_score = cycle.get("score", {})
 
             snapshot.whoop_recovery_score = rec_score.get("recovery_score")
             snapshot.whoop_hrv_ms = rec_score.get("hrv_rmssd_milli")
             snapshot.whoop_resting_hr = rec_score.get("resting_heart_rate")
-            snapshot.whoop_strain = cycle.get("score", {}).get("strain")
-            snapshot.whoop_sleep_performance = sleep_score.get(
-                "sleep_performance_percentage"
-            )
+            snapshot.whoop_spo2 = rec_score.get("spo2_percentage")
+            snapshot.whoop_skin_temp = rec_score.get("skin_temp_celsius")
+
+            snapshot.whoop_strain = cycle_score.get("strain")
+            snapshot.whoop_avg_hr = cycle_score.get("average_heart_rate")
+            snapshot.whoop_max_hr = cycle_score.get("max_heart_rate")
+            snapshot.whoop_kilojoule = cycle_score.get("kilojoule")
+
+            snapshot.whoop_sleep_performance = sleep_score.get("sleep_performance_percentage")
+            snapshot.whoop_respiratory_rate = sleep_score.get("respiratory_rate")
             if sleep_score.get("total_in_bed_time_milli"):
                 snapshot.whoop_sleep_duration_h = round(
                     sleep_score["total_in_bed_time_milli"] / 3_600_000, 2
                 )
+
+            workouts = whoop_data.get("workouts", [])
+            if workouts:
+                snapshot.whoop_workout_count = len(workouts)
+
             # Encrypt raw WHOOP payload before storing
             snapshot.raw_whoop_enc = encrypt_json(whoop_data)
 

@@ -4,6 +4,7 @@ WHOOP API v1 integration (OAuth 2.0).
 Docs: https://developer.whoop.com/api
 """
 
+from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -100,15 +101,20 @@ class WhoopClient:
         if not stored:
             raise RuntimeError("User not authorized with WHOOP.")
 
-        expires_at: datetime = stored.get("expires_at", datetime.min.replace(tzinfo=timezone.utc))
-        if datetime.now(tz=timezone.utc) >= expires_at - timedelta(minutes=5):
-            stored = await self.refresh_token()
+        expires_at = stored.get("expires_at")
+        if expires_at is not None:
+            if isinstance(expires_at, str):
+                expires_at = datetime.fromisoformat(expires_at)
+            if datetime.now(tz=timezone.utc) >= expires_at - timedelta(minutes=5):
+                stored = await self.refresh_token()
 
         return {"Authorization": f"Bearer {stored['access_token']}"}
 
     async def _get(self, path: str, params: dict | None = None) -> Any:
         headers = await self._get_headers()
         resp = await self._http.get(path, headers=headers, params=params or {})
+        if resp.status_code == 404:
+            return {}
         resp.raise_for_status()
         return resp.json()
 
@@ -120,14 +126,14 @@ class WhoopClient:
         self,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
-        limit: int = 7,
+        limit: int = 25,
     ) -> list[dict]:
         """Return a list of daily recovery records."""
-        params: dict = {"limit": limit}
+        params: dict = {"limit": min(limit, 25)}
         if start_date:
-            params["start"] = start_date.isoformat()
+            params["start"] = start_date.strftime("%Y-%m-%dT%H:%M:%SZ")
         if end_date:
-            params["end"] = end_date.isoformat()
+            params["end"] = end_date.strftime("%Y-%m-%dT%H:%M:%SZ")
         data = await self._get("/recovery", params)
         return data.get("records", [])
 
@@ -139,8 +145,8 @@ class WhoopClient:
     # Sleep
     # ------------------------------------------------------------------ #
 
-    async def get_sleep_collection(self, limit: int = 7) -> list[dict]:
-        data = await self._get("/activity/sleep", params={"limit": limit})
+    async def get_sleep_collection(self, limit: int = 25) -> list[dict]:
+        data = await self._get("/activity/sleep", params={"limit": min(limit, 25)})
         return data.get("records", [])
 
     async def get_latest_sleep(self) -> dict | None:
@@ -151,8 +157,8 @@ class WhoopClient:
     # Cycles (Strain)
     # ------------------------------------------------------------------ #
 
-    async def get_cycle_collection(self, limit: int = 7) -> list[dict]:
-        data = await self._get("/cycle", params={"limit": limit})
+    async def get_cycle_collection(self, limit: int = 25) -> list[dict]:
+        data = await self._get("/cycle", params={"limit": min(limit, 25)})
         return data.get("records", [])
 
     async def get_latest_cycle(self) -> dict | None:

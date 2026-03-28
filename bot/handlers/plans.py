@@ -2,6 +2,7 @@
 Training plan handlers for running, cycling, swimming, and strength.
 """
 
+from __future__ import annotations
 import logging
 
 from telegram import Update

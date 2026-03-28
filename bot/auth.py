@@ -23,8 +23,9 @@ class AuthMiddleware(BaseHandler):
     """Wraps another handler and gates access by Telegram user ID."""
 
     def __init__(self, inner: BaseHandler) -> None:
-        # Use the inner handler's callback for the superclass; we override check/handle.
-        super().__init__(inner.callback)
+        # ConversationHandler has no .callback attribute; use a no-op as placeholder
+        # since AuthMiddleware overrides handle_update entirely.
+        super().__init__(getattr(inner, "callback", lambda *a, **kw: None))
         self._inner = inner
 
     def check_update(self, update: object) -> Any:

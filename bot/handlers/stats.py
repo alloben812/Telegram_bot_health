@@ -2,6 +2,7 @@
 Stats and recovery handlers.
 """
 
+from __future__ import annotations
 import logging
 
 from telegram import Update
@@ -34,23 +35,47 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         return
 
     lines = ["📊 *Статистика за последние 7 дней*\n"]
-    lines.append(f"{'Дата':<12} {'Восст.':<9} {'HRV':<8} {'ЧСС п.':<8} {'Сон %':<7}")
-    lines.append("─" * 46)
 
     for s in reversed(snapshots):
         rec = s.whoop_recovery_score
+        strain = s.whoop_strain
         hrv = s.whoop_hrv_ms
         rhr = s.whoop_resting_hr
         sleep_p = s.whoop_sleep_performance
+        sleep_h = s.whoop_sleep_duration_h
+        avg_hr = s.whoop_avg_hr
+        max_hr = s.whoop_max_hr
+        kj = s.whoop_kilojoule
+        workouts = s.whoop_workout_count
         emoji = _recovery_emoji(rec)
 
-        lines.append(
-            f"{s.snapshot_date}  "
-            f"{emoji}{f'{rec:.0f}%':<8} "
-            f"{f'{hrv:.0f}мс' if hrv else '—':<8} "
-            f"{f'{rhr:.0f}' if rhr else '—':<8} "
-            f"{f'{sleep_p:.0f}%' if sleep_p else '—'}"
-        )
+        line = f"📅 *{s.snapshot_date}*\n"
+        if rec is not None:
+            line += f"  {emoji} Recovery: {rec:.0f}%"
+            if hrv:
+                line += f"  HRV: {hrv:.0f}мс"
+            if rhr:
+                line += f"  ЧСС п.: {rhr:.0f}"
+            line += "\n"
+        if strain is not None:
+            line += f"  ⚡ Strain: {strain:.1f}/21"
+            if avg_hr:
+                line += f"  ❤️ avg: {avg_hr}"
+            if max_hr:
+                line += f"  max: {max_hr}"
+            line += "\n"
+        if kj is not None:
+            kcal = round(kj / 4.184)
+            line += f"  🔥 Калории: {kcal} ккал\n"
+        if sleep_p is not None:
+            line += f"  😴 Сон: {sleep_p:.0f}%"
+            if sleep_h:
+                line += f" ({sleep_h:.1f}ч)"
+            line += "\n"
+        if workouts:
+            line += f"  🏋️ Тренировок: {workouts}\n"
+
+        lines.append(line)
 
     # Garmin summary from latest snapshot
     latest = snapshots[0]

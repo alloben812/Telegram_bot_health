@@ -12,6 +12,7 @@ Usage:
     plaintext  = decrypt(ciphertext)       # str → str
 """
 
+from __future__ import annotations
 import base64
 import os
 

@@ -7,6 +7,7 @@ The plan is tailored to the athlete's current fitness (Garmin)
 and recovery state (WHOOP).
 """
 
+from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
@@ -113,16 +114,28 @@ class AthleteContext:
         return "\n".join(lines)
 
 
+_NO_KEY_MSG = (
+    "🔑 AI-функции недоступны: ANTHROPIC_API_KEY не настроен.\n"
+    "Добавь ключ в .env и перезапусти бота."
+)
+
+
 class TrainingPlanner:
     """Generates training plans using the Anthropic Claude API."""
 
     def __init__(self) -> None:
-        self._client = anthropic.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
+        self._client = (
+            anthropic.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
+            if config.ANTHROPIC_API_KEY
+            else None
+        )
 
     async def generate_weekly_plan(
         self, sport: str, context: AthleteContext, goal: str = ""
     ) -> str:
         """Generate a full weekly training plan for the given sport."""
+        if not self._client:
+            return _NO_KEY_MSG
         sport_label = _SPORT_LABELS.get(sport, sport)
         goal_text = f"\n**Цель спортсмена:** {goal}" if goal else ""
 
@@ -156,6 +169,8 @@ class TrainingPlanner:
         self, sport: str, context: AthleteContext, session_type: str = "auto"
     ) -> str:
         """Generate a single workout session adapted to current recovery."""
+        if not self._client:
+            return _NO_KEY_MSG
         sport_label = _SPORT_LABELS.get(sport, sport)
 
         # Auto-select session type based on recovery
@@ -193,6 +208,8 @@ class TrainingPlanner:
 
     async def analyze_recovery(self, context: AthleteContext) -> str:
         """Analyse the athlete's current recovery state and give recommendations."""
+        if not self._client:
+            return _NO_KEY_MSG
         user_prompt = f"""\
 {context.to_prompt_text()}
 
@@ -215,6 +232,8 @@ class TrainingPlanner:
         self, question: str, context: AthleteContext
     ) -> str:
         """Free-form Q&A about training, recovery, or health."""
+        if not self._client:
+            return _NO_KEY_MSG
         user_prompt = f"""\
 {context.to_prompt_text()}
 
