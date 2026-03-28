@@ -23,9 +23,22 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
 async def init_db() -> None:
-    """Create all tables if they don't exist."""
+    """Create tables and apply lightweight column migrations."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Migrate: add columns that may be missing in existing DBs.
+        # ALTER TABLE … ADD COLUMN is idempotent-safe via the try/except.
+        for sql in [
+            "ALTER TABLE users ADD COLUMN garmin_oauth_token_enc TEXT",
+            "ALTER TABLE users ADD COLUMN garmin_password_enc TEXT",
+            "ALTER TABLE users ADD COLUMN whoop_token_enc TEXT",
+            "ALTER TABLE daily_snapshots ADD COLUMN raw_garmin_enc TEXT",
+            "ALTER TABLE daily_snapshots ADD COLUMN raw_whoop_enc TEXT",
+        ]:
+            try:
+                await conn.execute(__import__("sqlalchemy").text(sql))
+            except Exception:
+                pass  # column already exists — ignore
     logger.info("Database initialised")
 
 
