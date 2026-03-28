@@ -18,6 +18,30 @@ logger = logging.getLogger(__name__)
 
 _TOKEN_STORE: dict[int, dict] = {}  # user_id -> token dict
 
+# WHOOP sport_id → human-readable name
+WHOOP_SPORTS: dict[int, str] = {
+    -1: "activity",
+    0: "running",
+    1: "cycling",
+    16: "swimming",
+    44: "strength",
+    45: "functional_fitness",
+    63: "hiit",
+    20: "rowing",
+    41: "yoga",
+    57: "pilates",
+    74: "triathlon",
+    68: "walking",
+    15: "hiking",
+    9: "soccer",
+    8: "basketball",
+    3: "tennis",
+    54: "boxing",
+    56: "mma",
+    78: "crossfit",
+    93: "ski",
+}
+
 
 class WhoopClient:
     """Async WHOOP API client with OAuth 2.0 PKCE flow."""
@@ -113,6 +137,17 @@ class WhoopClient:
     async def _get(self, path: str, params: dict | None = None) -> Any:
         headers = await self._get_headers()
         resp = await self._http.get(path, headers=headers, params=params or {})
+        if resp.status_code == 401:
+            # Token expired — refresh and retry once
+            try:
+                stored = await self.refresh_token()
+                headers = {"Authorization": f"Bearer {stored['access_token']}"}
+                resp = await self._http.get(path, headers=headers, params=params or {})
+            except Exception as exc:
+                raise RuntimeError(
+                    "WHOOP токен истёк и не удалось обновить. "
+                    "Переподключи WHOOP через ⚙️ Настройки."
+                ) from exc
         if resp.status_code == 404:
             return {}
         resp.raise_for_status()
@@ -153,6 +188,82 @@ class WhoopClient:
         records = await self.get_sleep_collection(limit=1)
         return records[0] if records else None
 
+    async def get_sleeps_since(self, days: int = 28) -> list[dict]:
+        """Fetch all sleep records for the last N days using pagination."""
+        end_dt = datetime.now(tz=timezone.utc)
+        start_dt = end_dt - timedelta(days=days)
+
+        all_records: list[dict] = []
+        next_token: str | None = None
+
+        while True:
+            params: dict = {
+                "limit": 25,
+                "start": start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end": end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            if next_token:
+                params["nextToken"] = next_token
+
+            headers = await self._get_headers()
+            resp = await self._http.get("/activity/sleep", headers=headers, params=params)
+            if resp.status_code in (404, 204):
+                break
+            if resp.status_code == 401:
+                try:
+                    stored = await self.refresh_token()
+                    headers = {"Authorization": f"Bearer {stored['access_token']}"}
+                    resp = await self._http.get("/activity/sleep", headers=headers, params=params)
+                except Exception as exc:
+                    raise RuntimeError("WHOOP token expired") from exc
+            resp.raise_for_status()
+            data = resp.json()
+            records = data.get("records", [])
+            all_records.extend(records)
+            next_token = data.get("next_token")
+            if not next_token or not records:
+                break
+
+        return all_records
+
+    async def get_recoveries_since(self, days: int = 28) -> list[dict]:
+        """Fetch all recovery records for the last N days using pagination."""
+        end_dt = datetime.now(tz=timezone.utc)
+        start_dt = end_dt - timedelta(days=days)
+
+        all_records: list[dict] = []
+        next_token: str | None = None
+
+        while True:
+            params: dict = {
+                "limit": 25,
+                "start": start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end": end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            if next_token:
+                params["nextToken"] = next_token
+
+            headers = await self._get_headers()
+            resp = await self._http.get("/recovery", headers=headers, params=params)
+            if resp.status_code in (404, 204):
+                break
+            if resp.status_code == 401:
+                try:
+                    stored = await self.refresh_token()
+                    headers = {"Authorization": f"Bearer {stored['access_token']}"}
+                    resp = await self._http.get("/recovery", headers=headers, params=params)
+                except Exception as exc:
+                    raise RuntimeError("WHOOP token expired") from exc
+            resp.raise_for_status()
+            data = resp.json()
+            records = data.get("records", [])
+            all_records.extend(records)
+            next_token = data.get("next_token")
+            if not next_token or not records:
+                break
+
+        return all_records
+
     # ------------------------------------------------------------------ #
     # Cycles (Strain)
     # ------------------------------------------------------------------ #
@@ -169,9 +280,89 @@ class WhoopClient:
     # Workouts
     # ------------------------------------------------------------------ #
 
-    async def get_workout_collection(self, limit: int = 10) -> list[dict]:
-        data = await self._get("/activity/workout", params={"limit": limit})
+    async def get_workout_collection(self, limit: int = 25) -> list[dict]:
+        data = await self._get("/activity/workout", params={"limit": min(limit, 25)})
         return data.get("records", [])
+
+    async def get_workouts_since(self, days: int = 28) -> list[dict]:
+        """Fetch all workouts for the last N days using nextToken pagination."""
+        end_dt = datetime.now(tz=timezone.utc)
+        start_dt = end_dt - timedelta(days=days)
+
+        all_records: list[dict] = []
+        next_token: str | None = None
+
+        while True:
+            params: dict = {
+                "limit": 25,
+                "start": start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end": end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            if next_token:
+                params["nextToken"] = next_token
+
+            headers = await self._get_headers()
+            resp = await self._http.get(
+                "/activity/workout", headers=headers, params=params
+            )
+            if resp.status_code in (404, 204):
+                break
+            if resp.status_code == 401:
+                try:
+                    stored = await self.refresh_token()
+                    headers = {"Authorization": f"Bearer {stored['access_token']}"}
+                    resp = await self._http.get(
+                        "/activity/workout", headers=headers, params=params
+                    )
+                except Exception as exc:
+                    raise RuntimeError("WHOOP token expired") from exc
+            resp.raise_for_status()
+            data = resp.json()
+            records = data.get("records", [])
+            all_records.extend(records)
+            next_token = data.get("next_token")
+            if not next_token or not records:
+                break
+
+        return all_records
+
+    async def get_cycles_since(self, days: int = 28) -> list[dict]:
+        """Fetch all daily cycles for the last N days using pagination."""
+        end_dt = datetime.now(tz=timezone.utc)
+        start_dt = end_dt - timedelta(days=days)
+
+        all_records: list[dict] = []
+        next_token: str | None = None
+
+        while True:
+            params: dict = {
+                "limit": 25,
+                "start": start_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "end": end_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            }
+            if next_token:
+                params["nextToken"] = next_token
+
+            headers = await self._get_headers()
+            resp = await self._http.get("/cycle", headers=headers, params=params)
+            if resp.status_code in (404, 204):
+                break
+            if resp.status_code == 401:
+                try:
+                    stored = await self.refresh_token()
+                    headers = {"Authorization": f"Bearer {stored['access_token']}"}
+                    resp = await self._http.get("/cycle", headers=headers, params=params)
+                except Exception as exc:
+                    raise RuntimeError("WHOOP token expired") from exc
+            resp.raise_for_status()
+            data = resp.json()
+            records = data.get("records", [])
+            all_records.extend(records)
+            next_token = data.get("next_token")
+            if not next_token or not records:
+                break
+
+        return all_records
 
     # ------------------------------------------------------------------ #
     # Profile & body measurements
