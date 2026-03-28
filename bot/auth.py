@@ -3,10 +3,9 @@ Authorization middleware.
 
 The bot is strictly personal — it only responds to the Telegram user ID
 listed in ADMIN_TELEGRAM_ID. All other users receive a one-line rejection.
-
-This is enforced at the Application level via a custom BaseHandler wrapper,
-so no handler code needs to repeat the check.
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Any
@@ -17,6 +16,10 @@ from telegram.ext import BaseHandler, ContextTypes
 from config import config
 
 logger = logging.getLogger(__name__)
+
+
+async def _dummy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pass
 
 
 class AuthMiddleware(BaseHandler):
