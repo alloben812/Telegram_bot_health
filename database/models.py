@@ -109,6 +109,7 @@ class Activity(Base):
     calories: Mapped[Optional[int]] = mapped_column(Integer)
     avg_hr: Mapped[Optional[int]] = mapped_column(Integer)
     max_hr: Mapped[Optional[int]] = mapped_column(Integer)
+    whoop_strain: Mapped[Optional[float]] = mapped_column(Float)
     avg_pace_s_per_km: Mapped[Optional[float]] = mapped_column(Float)
     avg_power_w: Mapped[Optional[float]] = mapped_column(Float)
     avg_cadence: Mapped[Optional[float]] = mapped_column(Float)

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.future import select
 
 from config import config
-from database.models import Base, DailySnapshot, TrainingPlan, User
+from database.models import Activity, Base, DailySnapshot, TrainingPlan, User
 from security import decrypt, decrypt_json, encrypt, encrypt_json
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ async def init_db() -> None:
         ("daily_snapshots", "whoop_spo2", "FLOAT"),
         ("daily_snapshots", "whoop_skin_temp", "FLOAT"),
         ("daily_snapshots", "whoop_workout_count", "INTEGER"),
+        ("activities", "whoop_strain", "FLOAT"),
     ]
     async with engine.begin() as conn:
         for table, col, col_type in new_columns:
@@ -139,12 +140,12 @@ async def upsert_daily_snapshot(
             session.add(snapshot)
 
         if whoop_data:
-            recovery = whoop_data.get("recovery", {})
-            rec_score = recovery.get("score", {})
-            sleep = whoop_data.get("sleep", {})
-            sleep_score = sleep.get("score", {})
-            cycle = whoop_data.get("cycle", {})
-            cycle_score = cycle.get("score", {})
+            recovery = whoop_data.get("recovery") or {}
+            rec_score = recovery.get("score") or {}
+            sleep = whoop_data.get("sleep") or {}
+            sleep_score = sleep.get("score") or {}
+            cycle = whoop_data.get("cycle") or {}
+            cycle_score = cycle.get("score") or {}
 
             snapshot.whoop_recovery_score = rec_score.get("recovery_score")
             snapshot.whoop_hrv_ms = rec_score.get("hrv_rmssd_milli")
@@ -159,12 +160,13 @@ async def upsert_daily_snapshot(
 
             snapshot.whoop_sleep_performance = sleep_score.get("sleep_performance_percentage")
             snapshot.whoop_respiratory_rate = sleep_score.get("respiratory_rate")
-            if sleep_score.get("total_in_bed_time_milli"):
-                snapshot.whoop_sleep_duration_h = round(
-                    sleep_score["total_in_bed_time_milli"] / 3_600_000, 2
-                )
+            # v2 API nests total_in_bed_time_milli inside stage_summary
+            stage = sleep_score.get("stage_summary") or {}
+            in_bed_ms = stage.get("total_in_bed_time_milli") or sleep_score.get("total_in_bed_time_milli")
+            if in_bed_ms:
+                snapshot.whoop_sleep_duration_h = round(in_bed_ms / 3_600_000, 2)
 
-            workouts = whoop_data.get("workouts", [])
+            workouts = whoop_data.get("workouts") or []
             if workouts:
                 snapshot.whoop_workout_count = len(workouts)
 
@@ -202,6 +204,215 @@ def decrypt_snapshot_garmin(snapshot: DailySnapshot) -> dict | None:
 def decrypt_snapshot_whoop(snapshot: DailySnapshot) -> dict | None:
     """Decrypt and return the raw WHOOP payload from a snapshot."""
     return decrypt_json(snapshot.raw_whoop_enc)
+
+
+# ------------------------------------------------------------------ #
+# Activities (individual workouts)
+# ------------------------------------------------------------------ #
+
+
+async def save_whoop_workouts(user_id: int, workouts: list[dict]) -> int:
+    """Upsert WHOOP workout records into activities table.
+
+    Uses external_id (WHOOP workout id) to avoid duplicates.
+    Returns count of newly inserted records.
+    """
+    if not workouts:
+        return 0
+
+    inserted = 0
+    async with SessionLocal() as session:
+        for w in workouts:
+            ext_id = str(w.get("id", ""))
+            if not ext_id:
+                continue
+
+            result = await session.execute(
+                select(Activity).where(
+                    Activity.user_id == user_id,
+                    Activity.source == "whoop",
+                    Activity.external_id == ext_id,
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                continue
+
+            score = w.get("score") or {}  # score can be null for unscored workouts
+            # v2 API provides sport_name directly; v1 used sport_id
+            sport_name = (
+                w.get("sport_name")
+                or _whoop_sport_from_id(w.get("sport_id", -1))
+            )
+
+            start_str = w.get("start", "")
+            act_date = start_str[:10] if start_str else ""
+
+            duration_s = _duration_ms(w) if (w.get("start") and w.get("end")) else None
+            kilojoule = score.get("kilojoule")
+            calories = round(kilojoule * 0.239) if kilojoule else None
+
+            activity = Activity(
+                user_id=user_id,
+                source="whoop",
+                external_id=ext_id,
+                sport=sport_name,
+                activity_date=act_date,
+                duration_s=duration_s,
+                distance_m=score.get("distance_meter"),
+                calories=calories,
+                avg_hr=score.get("average_heart_rate"),
+                max_hr=score.get("max_heart_rate"),
+                whoop_strain=score.get("strain"),
+            )
+            session.add(activity)
+            inserted += 1
+
+        await session.commit()
+    return inserted
+
+
+def _duration_ms(w: dict) -> float | None:
+    """Calculate duration in seconds from start/end ISO timestamps."""
+    try:
+        from datetime import datetime as _dt
+        s = _dt.fromisoformat(w["start"].replace("Z", "+00:00"))
+        e = _dt.fromisoformat(w["end"].replace("Z", "+00:00"))
+        return (e - s).total_seconds()
+    except Exception:
+        return None
+
+
+def _whoop_sport_from_id(sport_id: int) -> str:
+    from integrations.whoop import WHOOP_SPORTS
+    return WHOOP_SPORTS.get(sport_id, f"sport_{sport_id}")
+
+
+async def save_garmin_activities(user_id: int, activities: list[dict]) -> int:
+    """Upsert Garmin activity records into activities table.
+
+    Uses activityId as external_id to avoid duplicates.
+    Returns count of newly inserted records.
+    """
+    if not activities:
+        return 0
+
+    _GARMIN_SPORT_MAP = {
+        "running": "running",
+        "trail_running": "running",
+        "treadmill_running": "running",
+        "cycling": "cycling",
+        "road_biking": "cycling",
+        "mountain_biking": "cycling",
+        "indoor_cycling": "cycling",
+        "open_water_swimming": "swimming",
+        "lap_swimming": "swimming",
+        "strength_training": "strength",
+        "indoor_cardio": "functional_fitness",
+        "hiit": "hiit",
+        "yoga": "yoga",
+        "pilates": "pilates",
+        "rowing": "rowing",
+        "indoor_rowing": "rowing",
+        "triathlon": "triathlon",
+        "walking": "walking",
+        "hiking": "hiking",
+        "tennis": "tennis",
+        "boxing": "boxing",
+        "cross_training": "functional_fitness",
+        "resort_skiing_snowboarding": "ski",
+        "skiing": "ski",
+    }
+
+    inserted = 0
+    async with SessionLocal() as session:
+        for a in activities:
+            ext_id = str(a.get("activityId", ""))
+            if not ext_id:
+                continue
+
+            result = await session.execute(
+                select(Activity).where(
+                    Activity.user_id == user_id,
+                    Activity.source == "garmin",
+                    Activity.external_id == ext_id,
+                )
+            )
+            if result.scalar_one_or_none():
+                continue
+
+            raw_sport = (
+                a.get("activityType", {}).get("typeKey", "activity")
+                if isinstance(a.get("activityType"), dict)
+                else "activity"
+            )
+            sport = _GARMIN_SPORT_MAP.get(raw_sport, raw_sport)
+
+            start_str = a.get("startTimeLocal") or a.get("startTimeGMT") or ""
+            act_date = start_str[:10] if start_str else ""
+
+            distance_m = a.get("distance") or None
+            duration_s = a.get("duration") or None
+            avg_hr = a.get("averageHR") or None
+            max_hr = a.get("maxHR") or None
+            calories = a.get("calories") or None
+            elevation = a.get("elevationGain") or None
+
+            avg_speed = a.get("averageSpeed")  # m/s
+            avg_pace = None
+            if avg_speed and avg_speed > 0:
+                avg_pace = 1000.0 / avg_speed  # s/km
+
+            avg_power = a.get("avgPower") or None
+            avg_cadence = a.get("averageRunningCadenceInStepsPerMinute") or a.get("averageCadence") or None
+
+            activity = Activity(
+                user_id=user_id,
+                source="garmin",
+                external_id=ext_id,
+                sport=sport,
+                activity_date=act_date,
+                duration_s=duration_s,
+                distance_m=distance_m,
+                calories=calories,
+                avg_hr=avg_hr,
+                max_hr=max_hr,
+                avg_pace_s_per_km=avg_pace,
+                avg_power_w=avg_power,
+                avg_cadence=avg_cadence,
+                elevation_gain_m=elevation,
+            )
+            session.add(activity)
+            inserted += 1
+
+        await session.commit()
+    return inserted
+    try:
+        from datetime import datetime as _dt
+        s = _dt.fromisoformat(w["start"].replace("Z", "+00:00"))
+        e = _dt.fromisoformat(w["end"].replace("Z", "+00:00"))
+        return (e - s).total_seconds()
+    except Exception:
+        return None
+
+
+async def get_recent_activities(
+    user_id: int, days: int = 28, source: str | None = None
+) -> list[Activity]:
+    """Return activities for the last N days, newest first."""
+    from datetime import date, timedelta
+
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    async with SessionLocal() as session:
+        q = (
+            select(Activity)
+            .where(Activity.user_id == user_id, Activity.activity_date >= cutoff)
+            .order_by(Activity.activity_date.desc())
+        )
+        if source:
+            q = q.where(Activity.source == source)
+        result = await session.execute(q)
+        return list(result.scalars().all())
 
 
 # ------------------------------------------------------------------ #

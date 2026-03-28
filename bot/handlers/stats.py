@@ -8,9 +8,32 @@ import logging
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from database.db import get_recent_snapshots, get_user
+from database.db import get_recent_activities, get_recent_snapshots, get_user
 
 logger = logging.getLogger(__name__)
+
+_SPORT_EMOJI: dict[str, str] = {
+    "running": "🏃",
+    "cycling": "🚴",
+    "swimming": "🏊",
+    "strength": "💪",
+    "functional_fitness": "🏋️",
+    "hiit": "⚡",
+    "rowing": "🚣",
+    "yoga": "🧘",
+    "pilates": "🧘",
+    "triathlon": "🏅",
+    "walking": "🚶",
+    "hiking": "🥾",
+    "soccer": "⚽",
+    "basketball": "🏀",
+    "tennis": "🎾",
+    "boxing": "🥊",
+    "mma": "🥋",
+    "crossfit": "🏋️",
+    "ski": "⛷️",
+    "activity": "🏃",
+}
 
 
 def _recovery_emoji(score: float | None) -> str:
@@ -24,11 +47,13 @@ def _recovery_emoji(score: float | None) -> str:
 
 
 async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Show last 7-day stats summary."""
+    """Show last 7-day stats summary + 4-week workout list."""
     user_id = update.effective_user.id
     snapshots = await get_recent_snapshots(user_id, days=7)
+    garmin_acts = await get_recent_activities(user_id, days=28, source="garmin")
+    whoop_acts = await get_recent_activities(user_id, days=28, source="whoop")
 
-    if not snapshots:
+    if not snapshots and not garmin_acts and not whoop_acts:
         await update.message.reply_text(
             "📊 Нет данных. Выполни 🔄 Синхронизацию, чтобы загрузить показатели."
         )
@@ -78,14 +103,49 @@ async def stats_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         lines.append(line)
 
     # Garmin summary from latest snapshot
-    latest = snapshots[0]
-    if latest.garmin_steps or latest.garmin_active_calories:
-        lines.append(
-            f"\n⌚ *Garmin ({latest.snapshot_date}):*\n"
-            f"  Шаги: {latest.garmin_steps or '—':,}\n"
-            f"  Активные ккал: {latest.garmin_active_calories or '—'}\n"
-            f"  Готовность: {latest.garmin_training_readiness or '—'}/100"
-        )
+    if snapshots:
+        latest = snapshots[0]
+        if latest.garmin_steps or latest.garmin_active_calories:
+            lines.append(
+                f"\n⌚ *Garmin ({latest.snapshot_date}):*\n"
+                f"  Шаги: {latest.garmin_steps or '—':,}\n"
+                f"  Активные ккал: {latest.garmin_active_calories or '—'}\n"
+                f"  Готовность: {latest.garmin_training_readiness or '—'}/100"
+            )
+
+    # Workout list for the past 4 weeks — both sources, equal weight
+    garmin_acts = await get_recent_activities(user_id, days=28, source="garmin")
+    whoop_acts = await get_recent_activities(user_id, days=28, source="whoop")
+
+    if whoop_acts:
+        lines.append(f"\n\n💍 *Тренировки WHOOP (4 нед.) — {len(whoop_acts)} шт:*\n")
+        for a in whoop_acts[:25]:
+            sport_e = _SPORT_EMOJI.get(a.sport, "🏃")
+            dur = f"{int(a.duration_s // 60)}мин" if a.duration_s else "—"
+            dist = f"{a.distance_m / 1000:.1f}км" if a.distance_m else ""
+            hr = f"пульс {a.avg_hr}" if a.avg_hr else ""
+            strain_str = f"strain {a.whoop_strain:.1f}" if a.whoop_strain else ""
+            details = "  ".join(filter(None, [dur, dist, hr, strain_str]))
+            lines.append(f"{sport_e} {a.activity_date}  {a.sport}  {details}")
+        if len(whoop_acts) > 25:
+            lines.append(f"_…и ещё {len(whoop_acts) - 25}_")
+
+    if garmin_acts:
+        lines.append(f"\n\n⌚ *Тренировки Garmin (4 нед.) — {len(garmin_acts)} шт:*\n")
+        for a in garmin_acts[:25]:
+            sport_e = _SPORT_EMOJI.get(a.sport, "🏃")
+            dur = f"{int(a.duration_s // 60)}мин" if a.duration_s else "—"
+            dist = f"{a.distance_m / 1000:.1f}км" if a.distance_m else ""
+            pace_str = ""
+            if a.avg_pace_s_per_km:
+                m, s = divmod(int(a.avg_pace_s_per_km), 60)
+                pace_str = f"{m}:{s:02d}/км"
+            hr = f"пульс {a.avg_hr}" if a.avg_hr else ""
+            elev = f"↑{a.elevation_gain_m:.0f}м" if a.elevation_gain_m else ""
+            details = "  ".join(filter(None, [dur, dist, pace_str, hr, elev]))
+            lines.append(f"{sport_e} {a.activity_date}  {a.sport}  {details}")
+        if len(garmin_acts) > 25:
+            lines.append(f"_…и ещё {len(garmin_acts) - 25}_")
 
     await update.message.reply_text(
         "\n".join(lines),

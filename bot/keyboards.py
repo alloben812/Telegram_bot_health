@@ -53,7 +53,8 @@ SYNC_KB = InlineKeyboardMarkup(
             InlineKeyboardButton("💍 Синхр. WHOOP", callback_data="sync:whoop"),
         ],
         [InlineKeyboardButton("🔄 Синхр. оба", callback_data="sync:all")],
-        [InlineKeyboardButton("📅 История WHOOP 30 дней", callback_data="sync:whoop_history")],
+        [InlineKeyboardButton("📅 История WHOOP 4 недели", callback_data="sync:whoop_history")],
+        [InlineKeyboardButton("⌚ История Garmin 4 недели", callback_data="sync:garmin_history")],
     ]
 )
 

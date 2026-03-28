@@ -22,7 +22,7 @@ class Config:
     WHOOP_REDIRECT_URI: str = os.getenv("WHOOP_REDIRECT_URI", "")
     WHOOP_AUTH_URL: str = "https://api.prod.whoop.com/oauth/oauth2/auth"
     WHOOP_TOKEN_URL: str = "https://api.prod.whoop.com/oauth/oauth2/token"
-    WHOOP_API_BASE: str = "https://api.prod.whoop.com/developer/v1"
+    WHOOP_API_BASE: str = "https://api.prod.whoop.com/developer/v2"
 
     # Anthropic
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
