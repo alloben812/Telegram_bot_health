@@ -85,9 +85,10 @@ async def settings_callback(
         return None
 
     if action == "status":
+        from database.db import get_garmin_password, get_whoop_token
         user = await get_user(update.effective_user.id)
-        garmin_ok = bool(user and user.garmin_email and user.garmin_password_enc)
-        whoop_ok = bool(user and user.whoop_token_enc)
+        garmin_ok = bool(user and user.garmin_email and get_garmin_password(user))
+        whoop_ok = bool(user and get_whoop_token(user))
         text = (
             "ℹ️ *Статус подключений*\n\n"
             f"⌚ Garmin Connect: {'✅ подключён' if garmin_ok else '❌ не настроен'}\n"
