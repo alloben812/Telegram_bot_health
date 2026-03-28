@@ -1,0 +1,31 @@
+# Fly.io deployment configuration
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "health-training-bot"   # Change this to your app name (must be unique on Fly.io)
+primary_region = "ams"         # Amsterdam — closest to Russia/Europe
+
+[build]
+
+[env]
+  DATABASE_URL = "sqlite+aiosqlite:////data/health_bot.db"
+
+# The bot uses long-polling, not a web server — no HTTP port needed.
+# We use a single always-on machine.
+[[vm]]
+  size = "shared-cpu-1x"   # 256 MB RAM — free tier
+  memory = "256mb"
+
+# Persistent volume for SQLite database
+[mounts]
+  source = "health_bot_data"
+  destination = "/data"
+  initial_size = "1gb"
+
+# No HTTP service — polling bot doesn't need it.
+# Keep the process alive with a health check via process signal.
+[checks]
+  [checks.alive]
+    type = "command"
+    command = ["python", "-c", "import sys; sys.exit(0)"]
+    interval = "30s"
+    timeout = "5s"

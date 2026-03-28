@@ -21,6 +21,7 @@ class User(Base):
     """Telegram user with device credentials.
 
     garmin_password_enc  — Fernet-encrypted password ciphertext
+    garmin_oauth_token_enc — Fernet-encrypted garth OAuth session (avoids 429)
     whoop_token_enc      — Fernet-encrypted JSON token ciphertext
     """
 
@@ -33,6 +34,9 @@ class User(Base):
     garmin_email: Mapped[Optional[str]] = mapped_column(String(256))
     # Encrypted with Fernet — never stored as plaintext
     garmin_password_enc: Mapped[Optional[str]] = mapped_column(Text)
+    # Garmin OAuth session token (garth base64 dump) — encrypted.
+    # Reusing this avoids re-login on every sync → no 429 rate limit.
+    garmin_oauth_token_enc: Mapped[Optional[str]] = mapped_column(Text)
 
     # Encrypted JSON token — never stored as plaintext
     whoop_token_enc: Mapped[Optional[str]] = mapped_column(Text)
