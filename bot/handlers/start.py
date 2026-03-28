@@ -194,4 +194,5 @@ def get_garmin_conv_handler() -> ConversationHandler:
             ],
         },
         fallbacks=[CommandHandler("cancel", garmin_setup_cancel)],
+        per_message=True,
     )
