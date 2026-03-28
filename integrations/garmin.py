@@ -1,12 +1,25 @@
 """
 Garmin Connect integration.
 
-Uses the garminconnect library to fetch activities, sleep,
+Uses the garminconnect library (backed by garth) to fetch activities, sleep,
 training load, and VO2max from Garmin Connect.
+
+## 429 rate-limit avoidance strategy
+
+Garmin aggressively rate-limits fresh logins.  We solve this by:
+
+1. After the first successful login we call `client.garth.dumps()` to get a
+   base64 representation of the OAuth session.
+2. That token is stored in the database (encrypted with Fernet).
+3. On every subsequent sync we call `client.login(tokenstore_base64=token)`
+   which reuses the existing session — no password exchange → no 429.
+4. If the stored token is expired or invalid we fall back to a password login,
+   refresh the stored token, and retry.
 """
 
 import asyncio
 import logging
+import time
 from datetime import date, timedelta
 from typing import Any
 
@@ -16,38 +29,117 @@ from config import config
 
 logger = logging.getLogger(__name__)
 
+# Back-off timings (seconds) for 429 / transient errors
+_RETRY_DELAYS = (5, 15, 30)
+
+
+def _login_with_token(email: str, token_b64: str) -> garminconnect.Garmin:
+    """Login reusing a cached OAuth token — avoids fresh auth and 429."""
+    client = garminconnect.Garmin(email, "")
+    client.login(tokenstore_base64=token_b64)
+    return client
+
+
+def _login_with_password(email: str, password: str) -> garminconnect.Garmin:
+    """Full OAuth login using email/password — use only when no cached token."""
+    client = garminconnect.Garmin(email, password)
+    client.login()
+    return client
+
 
 class GarminClient:
-    """Wrapper around garminconnect with async support."""
+    """Async wrapper around garminconnect.
+
+    Call `connect()` or `connect_cached()` before any data method.
+    """
 
     def __init__(self) -> None:
         self._client: garminconnect.Garmin | None = None
+        # Set after successful password login so callers can persist the token.
+        self.fresh_token_b64: str | None = None
 
-    async def connect(self) -> None:
-        """Authenticate and establish a session with Garmin Connect."""
+    # ------------------------------------------------------------------ #
+    # Connection
+    # ------------------------------------------------------------------ #
+
+    async def connect_cached(
+        self, email: str, password: str, token_b64: str | None
+    ) -> bool:
+        """
+        Try to connect using a cached OAuth token first.
+        Falls back to password login if the token is missing or rejected.
+
+        Returns True if the token was refreshed (caller should persist it).
+        """
         loop = asyncio.get_event_loop()
-        try:
-            self._client = await loop.run_in_executor(
-                None, self._create_client
-            )
-            logger.info("Connected to Garmin Connect")
-        except Exception as exc:
-            logger.error("Failed to connect to Garmin Connect: %s", exc)
-            raise
+        refreshed = False
 
-    def _create_client(self) -> garminconnect.Garmin:
-        client = garminconnect.Garmin(
-            config.GARMIN_EMAIL, config.GARMIN_PASSWORD
-        )
-        client.login()
-        return client
+        if token_b64:
+            try:
+                self._client = await loop.run_in_executor(
+                    None, _login_with_token, email, token_b64
+                )
+                logger.info("Garmin: connected via cached OAuth token")
+                return False  # no refresh needed
+            except Exception as exc:
+                logger.warning(
+                    "Garmin cached token rejected (%s), falling back to password", exc
+                )
+
+        # Full password login
+        self._client = await self._login_password_with_retry(email, password)
+        # Dump the new session token so the caller can store it
+        try:
+            self.fresh_token_b64 = self._client.garth.dumps()
+            refreshed = True
+            logger.info("Garmin: obtained fresh OAuth token")
+        except Exception as exc:
+            logger.warning("Could not dump Garmin token: %s", exc)
+
+        return refreshed
+
+    async def connect(self, email: str, password: str) -> None:
+        """Full password login (use connect_cached in production)."""
+        self._client = await self._login_password_with_retry(email, password)
+        try:
+            self.fresh_token_b64 = self._client.garth.dumps()
+        except Exception:
+            pass
+
+    async def _login_password_with_retry(
+        self, email: str, password: str
+    ) -> garminconnect.Garmin:
+        loop = asyncio.get_event_loop()
+        last_exc: Exception | None = None
+        for attempt, delay in enumerate((*_RETRY_DELAYS, None), start=1):
+            try:
+                client = await loop.run_in_executor(
+                    None, _login_with_password, email, password
+                )
+                return client
+            except Exception as exc:
+                last_exc = exc
+                err_str = str(exc).lower()
+                if "429" in err_str or "too many" in err_str:
+                    if delay is not None:
+                        logger.warning(
+                            "Garmin 429 on attempt %d, retrying in %ds", attempt, delay
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        raise RuntimeError(
+                            "Garmin rate-limited (429) after all retries. "
+                            "Wait a few minutes and try again."
+                        ) from exc
+                else:
+                    raise
+        raise last_exc  # type: ignore[misc]
 
     def _ensure_connected(self) -> None:
         if self._client is None:
-            raise RuntimeError("Not connected to Garmin. Call connect() first.")
+            raise RuntimeError("GarminClient not connected. Call connect_cached() first.")
 
     async def _run(self, func, *args, **kwargs) -> Any:
-        """Run a blocking garminconnect call in the thread pool."""
         self._ensure_connected()
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, lambda: func(*args, **kwargs))
@@ -56,116 +148,67 @@ class GarminClient:
     # Activities
     # ------------------------------------------------------------------ #
 
-    async def get_activities(
-        self, start: int = 0, limit: int = 10
-    ) -> list[dict]:
-        """Return recent activities sorted newest-first."""
-        data = await self._run(
-            self._client.get_activities, start, limit
-        )
-        return data or []
+    async def get_activities(self, start: int = 0, limit: int = 10) -> list[dict]:
+        return await self._run(self._client.get_activities, start, limit) or []
 
     async def get_activities_by_date(
-        self,
-        start_date: date,
-        end_date: date,
-        activity_type: str = "",
+        self, start_date: date, end_date: date, activity_type: str = ""
     ) -> list[dict]:
-        """Return activities between two dates, optionally filtered by type.
-
-        activity_type examples: 'running', 'cycling', 'swimming', 'strength_training'
-        """
-        data = await self._run(
+        return await self._run(
             self._client.get_activities_by_date,
             start_date.isoformat(),
             end_date.isoformat(),
             activity_type or None,
-        )
-        return data or []
+        ) or []
 
     async def get_last_activity(self) -> dict | None:
-        """Return the most recent activity or None."""
-        activities = await self.get_activities(start=0, limit=1)
-        return activities[0] if activities else None
+        acts = await self.get_activities(start=0, limit=1)
+        return acts[0] if acts else None
 
     # ------------------------------------------------------------------ #
-    # Heart rate & stress
+    # Heart rate / stress / sleep
     # ------------------------------------------------------------------ #
 
     async def get_heart_rates(self, target_date: date) -> dict:
-        """Return heart rate data for a specific date."""
-        return await self._run(
-            self._client.get_heart_rates, target_date.isoformat()
-        ) or {}
+        return await self._run(self._client.get_heart_rates, target_date.isoformat()) or {}
 
     async def get_stress_data(self, target_date: date) -> dict:
-        """Return stress score data for a specific date."""
-        return await self._run(
-            self._client.get_stress_data, target_date.isoformat()
-        ) or {}
-
-    # ------------------------------------------------------------------ #
-    # Sleep
-    # ------------------------------------------------------------------ #
+        return await self._run(self._client.get_stress_data, target_date.isoformat()) or {}
 
     async def get_sleep_data(self, target_date: date) -> dict:
-        """Return sleep data for a specific date (previous night)."""
-        return await self._run(
-            self._client.get_sleep_data, target_date.isoformat()
-        ) or {}
+        return await self._run(self._client.get_sleep_data, target_date.isoformat()) or {}
 
     # ------------------------------------------------------------------ #
-    # Training & fitness metrics
+    # Training metrics
     # ------------------------------------------------------------------ #
 
     async def get_training_status(self, target_date: date) -> dict:
-        """Return training status (load, readiness) for a specific date."""
-        return await self._run(
-            self._client.get_training_status, target_date.isoformat()
-        ) or {}
+        return await self._run(self._client.get_training_status, target_date.isoformat()) or {}
 
     async def get_training_readiness(self, target_date: date) -> dict:
-        """Return training readiness score."""
-        return await self._run(
-            self._client.get_training_readiness, target_date.isoformat()
-        ) or {}
-
-    async def get_hill_score(self, target_date: date) -> dict:
-        return await self._run(
-            self._client.get_hill_score, target_date.isoformat()
-        ) or {}
+        return await self._run(self._client.get_training_readiness, target_date.isoformat()) or {}
 
     async def get_endurance_score(self, target_date: date) -> dict:
-        return await self._run(
-            self._client.get_endurance_score, target_date.isoformat()
-        ) or {}
+        return await self._run(self._client.get_endurance_score, target_date.isoformat()) or {}
 
     # ------------------------------------------------------------------ #
-    # Steps & body battery
+    # Steps / body battery
     # ------------------------------------------------------------------ #
 
     async def get_steps_data(self, target_date: date) -> dict:
-        return await self._run(
-            self._client.get_steps_data, target_date.isoformat()
-        ) or {}
+        return await self._run(self._client.get_steps_data, target_date.isoformat()) or {}
 
     async def get_body_battery(self, target_date: date) -> list[dict]:
-        return await self._run(
-            self._client.get_body_battery, target_date.isoformat()
-        ) or []
+        return await self._run(self._client.get_body_battery, target_date.isoformat()) or []
 
     async def get_daily_summary(self, target_date: date) -> dict:
-        """Convenience: fetch all key daily metrics in one call."""
-        return await self._run(
-            self._client.get_stats, target_date.isoformat()
-        ) or {}
+        return await self._run(self._client.get_stats, target_date.isoformat()) or {}
 
     # ------------------------------------------------------------------ #
     # Weekly summary helper
     # ------------------------------------------------------------------ #
 
     async def get_weekly_summary(self) -> dict:
-        """Aggregate activities and metrics for the last 7 days."""
         end = date.today()
         start = end - timedelta(days=6)
 
@@ -173,15 +216,9 @@ class GarminClient:
         summary = await self.get_daily_summary(end)
         sleep = await self.get_sleep_data(end)
 
-        total_distance_m = sum(
-            a.get("distance", 0) or 0 for a in activities
-        )
-        total_duration_s = sum(
-            a.get("duration", 0) or 0 for a in activities
-        )
-        total_calories = sum(
-            a.get("calories", 0) or 0 for a in activities
-        )
+        total_distance_m = sum(a.get("distance", 0) or 0 for a in activities)
+        total_duration_s = sum(a.get("duration", 0) or 0 for a in activities)
+        total_calories = sum(a.get("calories", 0) or 0 for a in activities)
 
         sport_counts: dict[str, int] = {}
         for act in activities:
@@ -200,14 +237,7 @@ class GarminClient:
             "sleep": sleep,
         }
 
-    async def get_sport_history(
-        self, sport: str, days: int = 30
-    ) -> list[dict]:
-        """Return activities for a specific sport over the last N days."""
+    async def get_sport_history(self, sport: str, days: int = 30) -> list[dict]:
         end = date.today()
         start = end - timedelta(days=days - 1)
         return await self.get_activities_by_date(start, end, sport)
-
-
-# Module-level singleton
-garmin_client = GarminClient()

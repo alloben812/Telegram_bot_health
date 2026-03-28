@@ -31,6 +31,9 @@ class User(Base):
     garmin_email: Mapped[str | None] = mapped_column(String(256))
     # Encrypted with Fernet — never stored as plaintext
     garmin_password_enc: Mapped[str | None] = mapped_column(Text)
+    # Garmin OAuth session token (garth base64 dump) — encrypted.
+    # Reusing this avoids re-login on every sync → no 429 rate limit.
+    garmin_oauth_token_enc: Mapped[str | None] = mapped_column(Text)
 
     # Encrypted JSON token — never stored as plaintext
     whoop_token_enc: Mapped[str | None] = mapped_column(Text)

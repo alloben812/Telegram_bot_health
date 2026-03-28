@@ -62,6 +62,27 @@ async def update_user_garmin_credentials(
             await session.commit()
 
 
+async def update_garmin_oauth_token(user_id: int, token_b64: str) -> None:
+    """Cache the Garmin OAuth session token (garth base64 dump) encrypted in DB.
+
+    Reusing this on next sync avoids a fresh login → no 429 rate-limit hit.
+    """
+    async with SessionLocal() as session:
+        result = await session.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user:
+            user.garmin_oauth_token_enc = encrypt(token_b64)
+            user.updated_at = datetime.utcnow()
+            await session.commit()
+
+
+def get_garmin_oauth_token(user: User) -> str | None:
+    """Decrypt and return the cached Garmin OAuth base64 token, or None."""
+    if not user.garmin_oauth_token_enc:
+        return None
+    return decrypt(user.garmin_oauth_token_enc)
+
+
 async def update_user_whoop_token(user_id: int, token: dict) -> None:
     """Store WHOOP OAuth token — encrypted as JSON before writing."""
     async with SessionLocal() as session:
