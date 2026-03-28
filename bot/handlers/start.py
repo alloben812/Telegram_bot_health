@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 /start command and settings handlers.
 """

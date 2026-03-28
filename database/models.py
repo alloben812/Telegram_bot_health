@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """SQLAlchemy ORM models.
 
 Sensitive fields (Garmin password, WHOOP tokens) are stored encrypted

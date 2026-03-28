@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Garmin Connect integration.
 
@@ -34,9 +36,13 @@ _RETRY_DELAYS = (5, 15, 30)
 
 
 def _login_with_token(email: str, token_b64: str) -> garminconnect.Garmin:
-    """Login reusing a cached OAuth token — avoids fresh auth and 429."""
+    """Login reusing a cached garth session token — avoids fresh auth and 429.
+
+    garminconnect 0.2.x uses garth underneath.  We restore the session by
+    calling garth.loads(token_b64) before login() so it skips the OAuth dance.
+    """
     client = garminconnect.Garmin(email, "")
-    client.login(tokenstore_base64=token_b64)
+    client.garth.loads(token_b64)
     return client
 
 

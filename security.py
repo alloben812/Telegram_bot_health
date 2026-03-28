@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Encryption utilities for sensitive data at rest.
 

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Async database access layer.
 
 Sensitive fields are transparently encrypted/decrypted via security.py.

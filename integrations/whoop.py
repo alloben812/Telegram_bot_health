@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 WHOOP API v1 integration (OAuth 2.0).
 
