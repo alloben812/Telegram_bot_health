@@ -37,6 +37,10 @@ async def post_init(application: Application) -> None:
     logger.info("Bot started. Listening for user_id=%d", config.ADMIN_TELEGRAM_ID)
 
 
+async def error_handler(update: object, context) -> None:
+    logger.error("Unhandled exception", exc_info=context.error)
+
+
 def build_application() -> Application:
     # Fail immediately if any required env var is missing
     config.validate()
@@ -88,6 +92,8 @@ def build_application() -> Application:
             ask_ai_handler,
         ))
     )
+
+    app.add_error_handler(error_handler)
 
     return app
 
