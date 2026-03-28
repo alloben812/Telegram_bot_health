@@ -1,8 +1,13 @@
-"""SQLAlchemy ORM models."""
+"""SQLAlchemy ORM models.
+
+Sensitive fields (Garmin password, WHOOP tokens) are stored encrypted
+using Fernet symmetric encryption via security.py.
+The raw plaintext values are NEVER persisted to disk.
+"""
 
 from datetime import datetime
 
-from sqlalchemy import JSON, BigInteger, DateTime, Float, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -11,7 +16,11 @@ class Base(DeclarativeBase):
 
 
 class User(Base):
-    """Telegram user with device credentials."""
+    """Telegram user with device credentials.
+
+    garmin_password_enc  — Fernet-encrypted password ciphertext
+    whoop_token_enc      — Fernet-encrypted JSON token ciphertext
+    """
 
     __tablename__ = "users"
 
@@ -19,12 +28,12 @@ class User(Base):
     username: Mapped[str | None] = mapped_column(String(64))
     first_name: Mapped[str | None] = mapped_column(String(64))
 
-    # WHOOP OAuth tokens (stored as JSON)
-    whoop_token: Mapped[dict | None] = mapped_column(JSON)
-
-    # Garmin credentials (stored encrypted in production)
     garmin_email: Mapped[str | None] = mapped_column(String(256))
-    garmin_password: Mapped[str | None] = mapped_column(String(256))
+    # Encrypted with Fernet — never stored as plaintext
+    garmin_password_enc: Mapped[str | None] = mapped_column(Text)
+
+    # Encrypted JSON token — never stored as plaintext
+    whoop_token_enc: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow
@@ -35,7 +44,12 @@ class User(Base):
 
 
 class DailySnapshot(Base):
-    """Cached daily health snapshot (Garmin + WHOOP combined)."""
+    """Cached daily health snapshot (Garmin + WHOOP combined).
+
+    Numeric metrics are stored in plain columns for easy querying.
+    Raw API payloads (raw_garmin_enc, raw_whoop_enc) are Fernet-encrypted
+    because they may contain PII (HR data, GPS, etc.).
+    """
 
     __tablename__ = "daily_snapshots"
 
@@ -43,7 +57,7 @@ class DailySnapshot(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
     snapshot_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
 
-    # WHOOP
+    # WHOOP — aggregated numeric metrics (not sensitive enough to encrypt)
     whoop_recovery_score: Mapped[float | None] = mapped_column(Float)
     whoop_hrv_ms: Mapped[float | None] = mapped_column(Float)
     whoop_resting_hr: Mapped[float | None] = mapped_column(Float)
@@ -51,16 +65,16 @@ class DailySnapshot(Base):
     whoop_sleep_performance: Mapped[float | None] = mapped_column(Float)
     whoop_sleep_duration_h: Mapped[float | None] = mapped_column(Float)
 
-    # Garmin
+    # Garmin — aggregated numeric metrics
     garmin_steps: Mapped[int | None] = mapped_column(Integer)
     garmin_active_calories: Mapped[int | None] = mapped_column(Integer)
     garmin_body_battery_end: Mapped[int | None] = mapped_column(Integer)
     garmin_stress_avg: Mapped[int | None] = mapped_column(Integer)
     garmin_training_readiness: Mapped[int | None] = mapped_column(Integer)
 
-    # Raw JSON for full data
-    raw_garmin: Mapped[dict | None] = mapped_column(JSON)
-    raw_whoop: Mapped[dict | None] = mapped_column(JSON)
+    # Full raw API responses — encrypted at rest
+    raw_garmin_enc: Mapped[str | None] = mapped_column(Text)
+    raw_whoop_enc: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow
@@ -78,7 +92,7 @@ class Activity(Base):
     source: Mapped[str] = mapped_column(String(16))  # 'garmin' | 'whoop'
     external_id: Mapped[str | None] = mapped_column(String(64), index=True)
 
-    sport: Mapped[str] = mapped_column(String(32), index=True)  # running, cycling, etc.
+    sport: Mapped[str] = mapped_column(String(32), index=True)
     activity_date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
 
     duration_s: Mapped[float | None] = mapped_column(Float)
@@ -91,7 +105,6 @@ class Activity(Base):
     avg_cadence: Mapped[float | None] = mapped_column(Float)
     elevation_gain_m: Mapped[float | None] = mapped_column(Float)
 
-    raw_data: Mapped[dict | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.utcnow
     )
@@ -105,13 +118,14 @@ class TrainingPlan(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, index=True)
 
-    sport: Mapped[str] = mapped_column(String(32))  # running, cycling, swimming, strength
-    plan_type: Mapped[str] = mapped_column(String(32))  # weekly, single_session
+    sport: Mapped[str] = mapped_column(String(32))
+    plan_type: Mapped[str] = mapped_column(String(32))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
-    # Context snapshot used when generating the plan
-    context_snapshot: Mapped[dict | None] = mapped_column(JSON)
-
-    # The plan itself as markdown text
+    # The plan text is AI-generated and not sensitive — stored in plain text
     plan_text: Mapped[str] = mapped_column(Text)
-    plan_data: Mapped[dict | None] = mapped_column(JSON)
+
+    # Recovery/readiness values used when generating — stored plain for audit
+    recovery_score_at_gen: Mapped[float | None] = mapped_column(Float)
+    hrv_at_gen: Mapped[float | None] = mapped_column(Float)
+    readiness_at_gen: Mapped[int | None] = mapped_column(Integer)

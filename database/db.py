@@ -1,4 +1,8 @@
-"""Async database access layer."""
+"""Async database access layer.
+
+Sensitive fields are transparently encrypted/decrypted via security.py.
+Callers always work with plaintext values — encryption is an internal detail.
+"""
 
 import logging
 from datetime import datetime
@@ -8,6 +12,7 @@ from sqlalchemy.future import select
 
 from config import config
 from database.models import Base, DailySnapshot, TrainingPlan, User
+from security import decrypt, decrypt_json, encrypt, encrypt_json
 
 logger = logging.getLogger(__name__)
 
@@ -43,25 +48,27 @@ async def get_or_create_user(
         return user
 
 
-async def update_user_whoop_token(user_id: int, token: dict) -> None:
-    async with SessionLocal() as session:
-        result = await session.execute(select(User).where(User.id == user_id))
-        user = result.scalar_one_or_none()
-        if user:
-            user.whoop_token = token
-            user.updated_at = datetime.utcnow()
-            await session.commit()
-
-
 async def update_user_garmin_credentials(
     user_id: int, email: str, password: str
 ) -> None:
+    """Store Garmin credentials — password is Fernet-encrypted before writing."""
     async with SessionLocal() as session:
         result = await session.execute(select(User).where(User.id == user_id))
         user = result.scalar_one_or_none()
         if user:
             user.garmin_email = email
-            user.garmin_password = password
+            user.garmin_password_enc = encrypt(password)
+            user.updated_at = datetime.utcnow()
+            await session.commit()
+
+
+async def update_user_whoop_token(user_id: int, token: dict) -> None:
+    """Store WHOOP OAuth token — encrypted as JSON before writing."""
+    async with SessionLocal() as session:
+        result = await session.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user:
+            user.whoop_token_enc = encrypt_json(token)
             user.updated_at = datetime.utcnow()
             await session.commit()
 
@@ -70,6 +77,20 @@ async def get_user(user_id: int) -> User | None:
     async with SessionLocal() as session:
         result = await session.execute(select(User).where(User.id == user_id))
         return result.scalar_one_or_none()
+
+
+def get_garmin_password(user: User) -> str | None:
+    """Decrypt and return the Garmin password, or None if not set."""
+    if not user.garmin_password_enc:
+        return None
+    return decrypt(user.garmin_password_enc)
+
+
+def get_whoop_token(user: User) -> dict | None:
+    """Decrypt and return the WHOOP token dict, or None if not set."""
+    if not user.whoop_token_enc:
+        return None
+    return decrypt_json(user.whoop_token_enc)
 
 
 # ------------------------------------------------------------------ #
@@ -109,17 +130,19 @@ async def upsert_daily_snapshot(
             snapshot.whoop_sleep_performance = sleep_score.get(
                 "sleep_performance_percentage"
             )
-            if sleep.get("score", {}).get("total_in_bed_time_milli"):
+            if sleep_score.get("total_in_bed_time_milli"):
                 snapshot.whoop_sleep_duration_h = round(
                     sleep_score["total_in_bed_time_milli"] / 3_600_000, 2
                 )
-            snapshot.raw_whoop = whoop_data
+            # Encrypt raw WHOOP payload before storing
+            snapshot.raw_whoop_enc = encrypt_json(whoop_data)
 
         if garmin_data:
             snapshot.garmin_steps = garmin_data.get("totalSteps")
             snapshot.garmin_active_calories = garmin_data.get("activeKilocalories")
             snapshot.garmin_stress_avg = garmin_data.get("averageStressLevel")
-            snapshot.raw_garmin = garmin_data
+            # Encrypt raw Garmin payload before storing
+            snapshot.raw_garmin_enc = encrypt_json(garmin_data)
 
         await session.commit()
         await session.refresh(snapshot)
@@ -137,6 +160,16 @@ async def get_recent_snapshots(user_id: int, days: int = 7) -> list[DailySnapsho
         return list(result.scalars().all())
 
 
+def decrypt_snapshot_garmin(snapshot: DailySnapshot) -> dict | None:
+    """Decrypt and return the raw Garmin payload from a snapshot."""
+    return decrypt_json(snapshot.raw_garmin_enc)
+
+
+def decrypt_snapshot_whoop(snapshot: DailySnapshot) -> dict | None:
+    """Decrypt and return the raw WHOOP payload from a snapshot."""
+    return decrypt_json(snapshot.raw_whoop_enc)
+
+
 # ------------------------------------------------------------------ #
 # Training plans
 # ------------------------------------------------------------------ #
@@ -147,8 +180,9 @@ async def save_training_plan(
     sport: str,
     plan_type: str,
     plan_text: str,
-    context_snapshot: dict | None = None,
-    plan_data: dict | None = None,
+    recovery_score: float | None = None,
+    hrv: float | None = None,
+    readiness: int | None = None,
 ) -> TrainingPlan:
     async with SessionLocal() as session:
         plan = TrainingPlan(
@@ -156,8 +190,9 @@ async def save_training_plan(
             sport=sport,
             plan_type=plan_type,
             plan_text=plan_text,
-            context_snapshot=context_snapshot,
-            plan_data=plan_data,
+            recovery_score_at_gen=recovery_score,
+            hrv_at_gen=hrv,
+            readiness_at_gen=readiness,
         )
         session.add(plan)
         await session.commit()

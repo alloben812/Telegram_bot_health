@@ -8,7 +8,12 @@ from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes, MessageHandler, filters
 
 from bot.keyboards import MAIN_MENU_KB, back_keyboard, plan_type_keyboard
-from database.db import get_latest_plan, get_recent_snapshots, save_training_plan
+from database.db import (
+    decrypt_snapshot_garmin,
+    get_latest_plan,
+    get_recent_snapshots,
+    save_training_plan,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,13 +93,15 @@ async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         garmin_steps_today=latest.garmin_steps if latest else None,
     )
 
-    # Enrich with Garmin activity history if available
-    if latest and latest.raw_garmin:
-        weekly = latest.raw_garmin.get("_weekly", {})
-        ctx.recent_activities = weekly.get("activities", [])
-        ctx.weekly_distance_km = weekly.get("total_distance_km")
-        ctx.weekly_duration_h = weekly.get("total_duration_h")
-        ctx.weekly_sport_breakdown = weekly.get("sport_breakdown")
+    # Enrich with Garmin activity history if available (decrypt on demand)
+    if latest and latest.raw_garmin_enc:
+        raw_garmin = decrypt_snapshot_garmin(latest)
+        if raw_garmin:
+            weekly = raw_garmin.get("_weekly", {})
+            ctx.recent_activities = weekly.get("activities", [])
+            ctx.weekly_distance_km = weekly.get("total_distance_km")
+            ctx.weekly_duration_h = weekly.get("total_duration_h")
+            ctx.weekly_sport_breakdown = weekly.get("sport_breakdown")
 
     await query.edit_message_text("🤖 Генерирую план… Это займёт несколько секунд.")
 
@@ -110,11 +117,9 @@ async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             sport=sport,
             plan_type=plan_type,
             plan_text=plan_text,
-            context_snapshot={
-                "whoop_recovery": ctx.whoop_recovery_score,
-                "whoop_hrv": ctx.whoop_hrv_ms,
-                "garmin_readiness": ctx.garmin_training_readiness,
-            },
+            recovery_score=ctx.whoop_recovery_score,
+            hrv=ctx.whoop_hrv_ms,
+            readiness=ctx.garmin_training_readiness,
         )
 
         # Telegram message limit is 4096 chars; split if needed

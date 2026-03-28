@@ -10,7 +10,7 @@ from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from bot.keyboards import SYNC_KB
-from database.db import get_user, upsert_daily_snapshot
+from database.db import get_garmin_password, get_user, get_whoop_token, upsert_daily_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -43,22 +43,24 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # ---- Garmin ----
     if action in ("garmin", "all"):
-        if not user.garmin_email:
+        garmin_pw = get_garmin_password(user) if user.garmin_email else None
+        if not user.garmin_email or not garmin_pw:
             errors.append("⌚ Garmin не настроен (⚙️ Настройки → Garmin)")
         else:
             try:
                 from integrations.garmin import GarminClient
-                gc = GarminClient()
-                # Override credentials from per-user settings
-                from config import config as cfg
                 import garminconnect
+                import asyncio
+
+                gc = GarminClient()
+                _email = user.garmin_email
+                _pw = garmin_pw  # already decrypted plaintext
 
                 def _login():
-                    c = garminconnect.Garmin(user.garmin_email, user.garmin_password)
+                    c = garminconnect.Garmin(_email, _pw)
                     c.login()
                     return c
 
-                import asyncio
                 loop = asyncio.get_event_loop()
                 _client = await loop.run_in_executor(None, _login)
                 gc._client = _client
@@ -73,13 +75,14 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     # ---- WHOOP ----
     if action in ("whoop", "all"):
-        if not user.whoop_token:
+        whoop_token = get_whoop_token(user) if user.whoop_token_enc else None
+        if not whoop_token:
             errors.append("💍 WHOOP не авторизован (⚙️ Настройки → WHOOP)")
         else:
             try:
                 from integrations.whoop import WhoopClient
                 wc = WhoopClient(user_id)
-                wc.load_token(user.whoop_token)
+                wc.load_token(whoop_token)  # decrypted token dict
 
                 recovery = await wc.get_latest_recovery()
                 sleep = await wc.get_latest_sleep()
