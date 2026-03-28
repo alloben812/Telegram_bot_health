@@ -31,6 +31,11 @@ async def init_db() -> None:
 
     # Add new columns to existing tables (safe to run multiple times)
     new_columns = [
+        ("users", "garmin_oauth_token_enc", "TEXT"),
+        ("users", "garmin_password_enc", "TEXT"),
+        ("users", "whoop_token_enc", "TEXT"),
+        ("daily_snapshots", "raw_garmin_enc", "TEXT"),
+        ("daily_snapshots", "raw_whoop_enc", "TEXT"),
         ("daily_snapshots", "whoop_avg_hr", "INTEGER"),
         ("daily_snapshots", "whoop_max_hr", "INTEGER"),
         ("daily_snapshots", "whoop_kilojoule", "FLOAT"),
