@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Sync handler — pulls data from Garmin and WHOOP,
 stores it in the database, and shows a summary.

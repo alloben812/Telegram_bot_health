@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Garmin Connect integration.
 
