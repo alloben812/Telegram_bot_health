@@ -3,10 +3,9 @@ Authorization middleware.
 
 The bot is strictly personal — it only responds to the Telegram user ID
 listed in ADMIN_TELEGRAM_ID. All other users receive a one-line rejection.
-
-This is enforced at the Application level via a custom BaseHandler wrapper,
-so no handler code needs to repeat the check.
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Any
@@ -19,12 +18,17 @@ from config import config
 logger = logging.getLogger(__name__)
 
 
+async def _dummy_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    pass
+
+
 class AuthMiddleware(BaseHandler):
     """Wraps another handler and gates access by Telegram user ID."""
 
     def __init__(self, inner: BaseHandler) -> None:
-        # Use the inner handler's callback for the superclass; we override check/handle.
-        super().__init__(inner.callback)
+        # ConversationHandler has no .callback; use a dummy for the superclass.
+        callback = getattr(inner, "callback", _dummy_callback)
+        super().__init__(callback)
         self._inner = inner
 
     def check_update(self, update: object) -> Any:
