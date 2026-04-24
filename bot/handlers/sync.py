@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Sync handler — pulls data from Garmin and WHOOP,
 stores it in the database, and shows a summary.
@@ -146,7 +148,6 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             recovery = await wc.get_latest_recovery()
             sleep = await wc.get_latest_sleep()
             cycle = await wc.get_latest_cycle()
-            # Also grab today's workouts if any
             today_workouts = await wc.get_workout_collection(limit=10)
 
             await _persist_whoop_token(user_id)
@@ -166,7 +167,9 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             logger.error("WHOOP sync error: %s", exc)
             errors.append(f"💍 WHOOP: {exc}")
 
-    # Save snapshot
+    # ------------------------------------------------------------------ #
+    # Save & respond
+    # ------------------------------------------------------------------ #
     if garmin_data or whoop_data:
         await upsert_daily_snapshot(
             user_id=user_id,
@@ -175,7 +178,6 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             whoop_data=whoop_data,
         )
 
-    # Build summary message
     lines = ["✅ *Синхронизация завершена*\n"]
 
     if garmin_data:
@@ -183,9 +185,10 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         cal = garmin_data.get("activeKilocalories", "—")
         stress = garmin_data.get("averageStressLevel", "—")
         today_acts = garmin_data.get("_activities", [])
+        steps_fmt = f"{steps:,}" if isinstance(steps, int) else str(steps)
         lines.append(
             "⌚ *Garmin сегодня:*\n"
-            f"  Шаги: {steps:,}\n"
+            f"  Шаги: {steps_fmt}\n"
             f"  Активные ккал: {cal}\n"
             f"  Средний стресс: {stress}\n"
             f"  Тренировок сегодня: {len(today_acts)}\n"
@@ -200,22 +203,16 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if whoop_data:
         rec = whoop_data.get("recovery", {}).get("score", {})
         sl = whoop_data.get("sleep", {}).get("score", {})
-        cycle_s = whoop_data.get("cycle", {}).get("score", {})
+        cyc = whoop_data.get("cycle", {}).get("score", {})
 
         recovery_pct = rec.get("recovery_score", "—")
         hrv = rec.get("hrv_rmssd_milli", "—")
         rhr = rec.get("resting_heart_rate", "—")
-        strain = cycle_s.get("strain", "—")
+        strain = cyc.get("strain", "—")
         sleep_perf = sl.get("sleep_performance_percentage", "—")
         spo2 = rec.get("spo2_percentage")
         skin_temp = rec.get("skin_temp_celsius")
         resp_rate = sl.get("respiratory_rate")
-
-        for val in [hrv, rhr, strain, recovery_pct, sleep_perf]:
-            pass  # round in display below
-
-        def _fmt(v, decimals=1):
-            return round(v, decimals) if isinstance(v, float) else v
 
         emoji = (
             "🟢" if isinstance(recovery_pct, (int, float)) and recovery_pct >= 67
@@ -223,6 +220,9 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             else "🔴" if isinstance(recovery_pct, (int, float))
             else "⚪"
         )
+
+        def _fmt(v, decimals=1):
+            return round(v, decimals) if isinstance(v, float) else v
 
         body = (
             f"💍 *WHOOP сегодня:*\n"
@@ -332,7 +332,6 @@ async def sync_whoop_history(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
         inserted_workouts = await save_whoop_workouts(user_id, workouts)
 
-        # Build diagnostic lines
         summary = (
             f"✅ *WHOOP история за 4 недели:*\n\n"
             f"⚡ Дней со strain: {len(cycle_by_date)} из 28\n"

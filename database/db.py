@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Async database access layer.
 
 Sensitive fields are transparently encrypted/decrypted via security.py.
@@ -29,6 +31,11 @@ async def init_db() -> None:
 
     # Add new columns to existing tables (safe to run multiple times)
     new_columns = [
+        ("users", "garmin_oauth_token_enc", "TEXT"),
+        ("users", "garmin_password_enc", "TEXT"),
+        ("users", "whoop_token_enc", "TEXT"),
+        ("daily_snapshots", "raw_garmin_enc", "TEXT"),
+        ("daily_snapshots", "raw_whoop_enc", "TEXT"),
         ("daily_snapshots", "whoop_avg_hr", "INTEGER"),
         ("daily_snapshots", "whoop_max_hr", "INTEGER"),
         ("daily_snapshots", "whoop_kilojoule", "FLOAT"),
@@ -85,6 +92,20 @@ async def update_user_garmin_credentials(
             await session.commit()
 
 
+async def update_garmin_oauth_token(user_id: int, token_b64: str) -> None:
+    """Cache the Garmin OAuth session token (garth base64 dump) encrypted in DB.
+
+    Reusing this on next sync avoids a fresh login → no 429 rate-limit hit.
+    """
+    async with SessionLocal() as session:
+        result = await session.execute(select(User).where(User.id == user_id))
+        user = result.scalar_one_or_none()
+        if user:
+            user.garmin_oauth_token_enc = encrypt(token_b64)
+            user.updated_at = datetime.utcnow()
+            await session.commit()
+
+
 async def update_user_whoop_token(user_id: int, token: dict) -> None:
     """Store WHOOP OAuth token — encrypted as JSON before writing."""
     async with SessionLocal() as session:
@@ -103,17 +124,36 @@ async def get_user(user_id: int) -> User | None:
 
 
 def get_garmin_password(user: User) -> str | None:
-    """Decrypt and return the Garmin password, or None if not set."""
+    """Decrypt and return the Garmin password, or None if key mismatch/not set."""
     if not user.garmin_password_enc:
         return None
-    return decrypt(user.garmin_password_enc)
+    try:
+        return decrypt(user.garmin_password_enc)
+    except ValueError:
+        logger.warning("Garmin password decryption failed for user %s — token invalid", user.id)
+        return None
 
 
 def get_whoop_token(user: User) -> dict | None:
-    """Decrypt and return the WHOOP token dict, or None if not set."""
+    """Decrypt and return the WHOOP token dict, or None if key mismatch/not set."""
     if not user.whoop_token_enc:
         return None
-    return decrypt_json(user.whoop_token_enc)
+    try:
+        return decrypt_json(user.whoop_token_enc)
+    except ValueError:
+        logger.warning("WHOOP token decryption failed for user %s — token invalid", user.id)
+        return None
+
+
+def get_garmin_oauth_token(user: User) -> str | None:
+    """Decrypt and return the cached Garmin OAuth base64 token, or None."""
+    if not user.garmin_oauth_token_enc:
+        return None
+    try:
+        return decrypt(user.garmin_oauth_token_enc)
+    except ValueError:
+        logger.warning("Garmin OAuth token decryption failed for user %s", user.id)
+        return None
 
 
 # ------------------------------------------------------------------ #
