@@ -2,6 +2,21 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Multi-Agent Project Context
+
+This repository is also worked on by other LLM agents. Before making product, architecture, or implementation-scope decisions, read:
+
+- `AGENTS.md`
+- `docs/PRODUCT.md`
+- `docs/ARCHITECTURE.md`
+- `docs/AGENT_ROLES.md`
+
+The sections below describe the current/legacy implementation mechanics. The target MVP has moved toward a daily assistant with Telegram webhook, Web Connect UI, OpenAI behind a provider abstraction, Neon Postgres, Render deployment, and GitHub Actions cron. If this file conflicts with `AGENTS.md` or `docs/`, treat the conflict as a migration gap and report it before changing behavior.
+
+## Communication Language
+
+Always communicate with the user in **Russian**. All responses, explanations, and questions must be in Russian.
+
 ## Running the Bot
 
 ```bash

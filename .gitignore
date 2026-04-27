@@ -29,6 +29,9 @@ secrets/
 *.sqlite
 *.sqlite3
 
+# --- Garmin local cache ---
+.garth_cache/
+
 # --- Logs ---
 *.log
 logs/
