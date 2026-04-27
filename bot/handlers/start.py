@@ -17,6 +17,7 @@ from telegram.ext import (
 )
 
 from bot.keyboards import MAIN_MENU_KB, SETTINGS_KB, back_keyboard
+from config import config
 from database.db import (
     get_or_create_user,
     get_user,
@@ -65,6 +66,21 @@ async def settings_callback(
     action = query.data.split(":")[1]
 
     if action == "garmin":
+        if config.GARMIN_EMAIL and config.GARMIN_PASSWORD:
+            await update_user_garmin_credentials(
+                update.effective_user.id,
+                config.GARMIN_EMAIL,
+                config.GARMIN_PASSWORD,
+            )
+            await query.edit_message_text(
+                "✅ *Garmin Connect настроен из `.env`*\n\n"
+                "Это временный режим для локального тестирования. "
+                "Используй 🔄 Синхронизацию, чтобы загрузить данные.",
+                parse_mode="Markdown",
+                reply_markup=back_keyboard("settings:back"),
+            )
+            return ConversationHandler.END
+
         await query.edit_message_text(
             "⌚ *Настройка Garmin Connect*\n\n"
             "Введи свой email от аккаунта Garmin Connect:",
@@ -92,7 +108,10 @@ async def settings_callback(
     if action == "status":
         from database.db import get_garmin_password, get_whoop_token
         user = await get_user(update.effective_user.id)
-        garmin_ok = bool(user and user.garmin_email and get_garmin_password(user))
+        garmin_ok = bool(
+            (user and user.garmin_email and get_garmin_password(user))
+            or (config.GARMIN_EMAIL and config.GARMIN_PASSWORD)
+        )
         whoop_ok = bool(user and get_whoop_token(user))
         text = (
             "ℹ️ *Статус подключений*\n\n"

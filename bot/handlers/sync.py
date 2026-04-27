@@ -17,6 +17,7 @@ from telegram import Update
 from telegram.ext import CallbackQueryHandler, ContextTypes
 
 from bot.keyboards import SYNC_KB
+from config import config
 from database.db import (
     get_garmin_password,
     get_user,
@@ -58,15 +59,21 @@ async def _build_garmin_client(user):
     """Login to Garmin with cached session, return GarminClient."""
     from integrations.garmin import GarminClient
 
-    garmin_pw = get_garmin_password(user) if user.garmin_email else None
-    if not user.garmin_email or not garmin_pw:
-        raise RuntimeError("Garmin не настроен (⚙️ Настройки → Garmin)")
+    db_email = user.garmin_email
+    db_password = get_garmin_password(user) if db_email else None
+    email = db_email or config.GARMIN_EMAIL
+    password = db_password or config.GARMIN_PASSWORD
+
+    if not email or not password:
+        raise RuntimeError(
+            "Garmin не настроен. Для локального теста заполни "
+            "GARMIN_EMAIL и GARMIN_PASSWORD в .env или настрой Garmin в боте."
+        )
 
     gc = GarminClient()
-    email, pw = user.garmin_email, garmin_pw
 
     def _login():
-        return gc._create_client_for_user(email, pw)
+        return gc._create_client_for_user(email, password)
 
     loop = asyncio.get_event_loop()
     gc._client = await loop.run_in_executor(None, _login)
