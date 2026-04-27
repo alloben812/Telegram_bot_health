@@ -6,7 +6,6 @@ Sensitive fields are transparently encrypted/decrypted via security.py.
 Callers always work with plaintext values — encryption is an internal detail.
 """
 
-from __future__ import annotations
 import logging
 from datetime import datetime
 from sqlalchemy import text
@@ -427,13 +426,6 @@ async def save_garmin_activities(user_id: int, activities: list[dict]) -> int:
 
         await session.commit()
     return inserted
-    try:
-        from datetime import datetime as _dt
-        s = _dt.fromisoformat(w["start"].replace("Z", "+00:00"))
-        e = _dt.fromisoformat(w["end"].replace("Z", "+00:00"))
-        return (e - s).total_seconds()
-    except Exception:
-        return None
 
 
 async def get_recent_activities(
