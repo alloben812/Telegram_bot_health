@@ -9,7 +9,6 @@ The plan is tailored to the athlete's current fitness (Garmin)
 and recovery state (WHOOP).
 """
 
-from __future__ import annotations
 import logging
 from dataclasses import dataclass
 

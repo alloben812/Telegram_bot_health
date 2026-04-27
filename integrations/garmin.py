@@ -14,7 +14,6 @@ Token caching strategy:
   - A cooldown file prevents hammering sso.garmin.com after a 429
 """
 
-from __future__ import annotations
 import asyncio
 import json
 import logging
