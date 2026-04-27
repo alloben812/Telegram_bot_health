@@ -194,7 +194,7 @@ async def recovery_handler(
             advice = "🔴 Низкое восстановление — лучше активный отдых или лёгкая восстановительная работа."
         lines.append(f"\n{advice}")
 
-    # AI analysis (if Anthropic key configured)
+    # AI analysis (if AI provider configured)
     if user and (s.whoop_recovery_score is not None or s.garmin_training_readiness):
         lines.append("\n⏳ _Получаю AI-анализ…_")
         msg = await update.message.reply_text(
