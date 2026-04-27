@@ -145,7 +145,7 @@ async def plan_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.error("Plan generation failed: %s", exc)
         await query.edit_message_text(
             f"❌ Ошибка генерации плана: {exc}\n\n"
-            "Убедись, что в .env настроен ANTHROPIC_API_KEY.",
+            "Убедись, что в .env настроен OPENAI_API_KEY и на счету есть баланс.",
             reply_markup=plan_type_keyboard(sport),
         )
 
