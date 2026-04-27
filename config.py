@@ -24,9 +24,9 @@ class Config:
     WHOOP_TOKEN_URL: str = "https://api.prod.whoop.com/oauth/oauth2/token"
     WHOOP_API_BASE: str = "https://api.prod.whoop.com/developer/v2"
 
-    # Anthropic
-    ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
-    CLAUDE_MODEL: str = "claude-sonnet-4-6"
+    # OpenAI
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
 
     # Database
     DATABASE_URL: str = os.getenv(
