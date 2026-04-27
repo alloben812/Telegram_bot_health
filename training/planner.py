@@ -7,11 +7,15 @@ Uses AIProvider abstraction — no direct dependency on any specific AI SDK.
 The default provider is OpenAI (gpt-4o); swap via ai.set_provider().
 """
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from pydantic import ValidationError
+
 from ai.provider import AIProvider
+from ai.schemas import DailyRecommendation
 
 logger = logging.getLogger(__name__)
 
@@ -276,6 +280,78 @@ class TrainingPlanner:
         return await provider.complete(
             system=_SYSTEM_PROMPT, user=user_prompt, max_tokens=800
         )
+
+    async def generate_daily_recommendation(
+        self, context: AthleteContext
+    ) -> DailyRecommendation:
+        """
+        Generate today's structured recommendation.
+
+        Returns a validated DailyRecommendation.
+        Raises RuntimeError if provider is not configured.
+        Raises ValueError if AI returns invalid JSON or schema mismatch.
+        """
+        provider = self._get_provider()
+        if not provider:
+            raise RuntimeError(_NO_KEY_MSG)
+
+        system = """\
+Ты — элитный тренер по выносливости. Анализируй данные спортсмена и возвращай \
+рекомендацию СТРОГО в виде JSON-объекта без markdown-обёртки и без пояснений вне JSON.
+
+Схема JSON:
+{
+  "readiness_score": <0-100>,
+  "status_label": "<краткий статус, например: Умеренная готовность>",
+  "main_recommendation": "<главная рекомендация одной фразой>",
+  "planned_workout": {
+    "sport": "<run|bike|swim|strength|walk|mobility|recovery|rest|other>",
+    "title": "<название тренировки>",
+    "duration_minutes": <число или null>,
+    "intensity": "<z1|z2|z3|z4|z5|easy|moderate|hard|rest>",
+    "blocks": [
+      {
+        "title": "<название блока>",
+        "duration_minutes": <число>,
+        "target_hr_zone": "<z1-z5 или null>",
+        "target_hr_range": "<например 130-145 или null>",
+        "notes": "<заметки или null>"
+      }
+    ]
+  },
+  "reasoning": ["<факт 1>", "<факт 2>"],
+  "avoid": ["<чего избегать 1>"],
+  "control": ["<сигнал для остановки 1>"],
+  "confidence": "<low|medium|high>",
+  "data_gaps": ["<чего не хватает для полного анализа>"]
+}
+
+Если данных недостаточно — снижай confidence и заполняй data_gaps.\
+"""
+
+        user_prompt = context.to_prompt_text()
+
+        raw = await provider.complete(system=system, user=user_prompt, max_tokens=1024)
+
+        # Strip accidental markdown fences
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            logger.error("AI returned invalid JSON: %s\nRaw: %.500s", exc, raw)
+            raise ValueError(f"AI вернул невалидный JSON: {exc}") from exc
+
+        try:
+            return DailyRecommendation.model_validate(data)
+        except ValidationError as exc:
+            logger.error("AI JSON failed schema validation: %s\nData: %s", exc, data)
+            raise ValueError(f"AI JSON не прошёл валидацию схемы: {exc}") from exc
 
 
 # Module-level singleton

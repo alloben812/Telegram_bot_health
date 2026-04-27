@@ -11,6 +11,7 @@ Usage:
 
 from ai.provider import AIProvider
 from ai.openai_provider import OpenAIProvider
+from ai.schemas import DailyRecommendation, PlannedWorkout, WorkoutBlock
 
 _default: AIProvider | None = None
 
@@ -29,4 +30,7 @@ def set_provider(provider: AIProvider) -> None:
     _default = provider
 
 
-__all__ = ["AIProvider", "OpenAIProvider", "get_provider", "set_provider"]
+__all__ = [
+    "AIProvider", "OpenAIProvider", "get_provider", "set_provider",
+    "DailyRecommendation", "PlannedWorkout", "WorkoutBlock",
+]
