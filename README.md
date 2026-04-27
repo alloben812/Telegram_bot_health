@@ -1,48 +1,60 @@
 # Telegram Health & Training Bot
 
-Персональный тренировочный бот для Telegram с интеграцией **Garmin Connect** и **WHOOP**, работающий на базе **Claude AI**.
+Персональный ежедневный тренировочный ассистент в Telegram с интеграцией **Garmin Connect** и **WHOOP**, работающий на базе **OpenAI GPT-4o**.
 
 ## Возможности
 
-- 📊 **Статистика** — просмотр метрик активности, HRV, ЧСС покоя за последние 7 дней
-- 💤 **Восстановление** — анализ WHOOP Recovery, качества сна и готовности к тренировкам
-- 🏃 **Планы бега** — недельные планы и отдельные сессии, адаптированные под твоё состояние
-- 🚴 **Планы велосипеда** — структурированные велосессии с зонами мощности
-- 🏊 **Планы плавания** — тренировки по стилям с объёмом и интенсивностью
-- 💪 **Силовые тренировки** — программы, учитывающие усталость и восстановление
-- 🤖 **AI-тренер** — свободный диалог, ответы на вопросы о тренировках
+- 📅 **Рекомендация на сегодня** — AI анализирует данные восстановления и строит персонализированный план тренировки
+- 🎯 **Беговые цели** — выбор и смена пресетов (10 км, полумарафон, марафон)
+- 👤 **Профиль спортсмена** — максимальный пульс, дни тренировок, силовые дни/нед.
+- 📆 **История** — последние 7 дней рекомендаций и тренировок
+- ✅ **Фидбек** — кнопки «Сделал / Не сделал» после каждой тренировки
+- 🔄 **Синхронизация** — загрузка данных с Garmin и WHOOP
 
 ## Стек технологий
 
 | Компонент | Технология |
 |---|---|
 | Бот | `python-telegram-bot` v21 (async) |
-| Garmin | `garminconnect` library |
+| Garmin | `garminconnect` + `garth` (OAuth token cache) |
 | WHOOP | WHOOP API v1 (OAuth 2.0) |
-| AI-планировщик | Anthropic Claude (`claude-sonnet-4-6`) |
-| База данных | SQLite + SQLAlchemy (async) |
+| AI-планировщик | OpenAI GPT-4o за `AIProvider` абстракцией |
+| База данных | SQLite (dev) / Neon Postgres (prod) + SQLAlchemy async |
+| Деплой | Render Free Web Service (webhook) |
 
 ## Структура проекта
 
 ```
 Telegram_bot_health/
+├── ai/
+│   ├── provider.py          # Абстракция AIProvider
+│   ├── openai_provider.py   # OpenAI реализация
+│   └── schemas.py           # Pydantic-схемы (DailyRecommendation, PlannedWorkout)
 ├── bot/
-│   ├── main.py              # Точка входа
-│   ├── keyboards.py         # Клавиатуры
+│   ├── main.py              # Точка входа, регистрация хэндлеров
+│   ├── auth.py              # AuthMiddleware (только ADMIN_TELEGRAM_ID)
+│   ├── keyboards.py         # Главное меню, Goal KB, Workout feedback KB
 │   └── handlers/
-│       ├── start.py         # /start, настройки, авторизация
-│       ├── sync.py          # Синхронизация Garmin/WHOOP
-│       ├── stats.py         # Статистика и восстановление
-│       └── plans.py         # Тренировочные планы + AI Q&A
+│       ├── onboarding.py    # /start, ConversationHandler (4 шага)
+│       ├── today.py         # 📅 Сегодня — AI рекомендация
+│       ├── history.py       # 📆 История — последние 7 дней
+│       ├── profile.py       # 👤 Профиль, 🎯 Цель
+│       ├── sync.py          # 🔄 Синхронизация Garmin/WHOOP
+│       └── settings.py      # ⚙️ Настройки, подключение устройств
 ├── integrations/
-│   ├── garmin.py            # Garmin Connect API
-│   └── whoop.py             # WHOOP API (OAuth 2.0)
+│   ├── garmin.py            # Garmin Connect API (с garth token cache)
+│   └── whoop.py             # WHOOP API (OAuth 2.0, auto-refresh)
 ├── training/
-│   └── planner.py           # AI-тренер (Claude)
+│   ├── planner.py           # TrainingPlanner, AthleteContext
+│   └── goals.py             # GoalPreset пресеты (3 MVP цели)
 ├── database/
-│   ├── models.py            # ORM-модели
-│   └── db.py                # CRUD-операции
+│   ├── models.py            # ORM-модели (User, Snapshot, Profile, Recommendation…)
+│   └── db.py                # CRUD + шифрование токенов (Fernet)
+├── security.py              # Fernet encryption (PBKDF2 от SECRET_KEY)
 ├── config.py                # Конфигурация из .env
+├── scripts/
+│   ├── check_baseline.py    # Базовая проверка синтаксиса/импортов
+│   └── garmin_login.py      # Ручная авторизация Garmin (при 429 cooldown)
 ├── requirements.txt
 └── .env.example
 ```
@@ -52,8 +64,8 @@ Telegram_bot_health/
 ### 1. Клонируй репозиторий
 
 ```bash
-git clone https://github.com/alloben812/telegram_bot_health.git
-cd telegram_bot_health
+git clone https://github.com/alloben812/Telegram_bot_health.git
+cd Telegram_bot_health
 ```
 
 ### 2. Установи зависимости
@@ -70,15 +82,24 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Заполни `.env`:
+Обязательные переменные:
 
 | Переменная | Где взять |
 |---|---|
 | `TELEGRAM_BOT_TOKEN` | [@BotFather](https://t.me/BotFather) |
+| `ADMIN_TELEGRAM_ID` | [@userinfobot](https://t.me/userinfobot) — твой числовой ID |
+| `SECRET_KEY` | `python -c "import secrets; print(secrets.token_hex(32))"` |
+| `OPENAI_API_KEY` | [platform.openai.com](https://platform.openai.com) |
+
+Опциональные (подключаются через настройки бота):
+
+| Переменная | Описание |
+|---|---|
 | `GARMIN_EMAIL` / `GARMIN_PASSWORD` | Аккаунт Garmin Connect |
 | `WHOOP_CLIENT_ID` / `WHOOP_CLIENT_SECRET` | [developer.whoop.com](https://developer.whoop.com) |
-| `WHOOP_REDIRECT_URI` | URL твоего сервера или ngrok |
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) |
+| `WHOOP_REDIRECT_URI` | URL для OAuth redirect |
+
+> **Важно:** `SECRET_KEY` нельзя менять после первого запуска — все зашифрованные поля в БД станут нечитаемы.
 
 ### 4. Запусти бота
 
@@ -88,40 +109,49 @@ python -m bot.main
 
 ## Локальная проверка
 
-Перед изменениями и перед PR запускай базовую проверку:
-
 ```bash
 venv/bin/python scripts/check_baseline.py
 ```
 
-Она проверяет синтаксис Python-файлов и импорт ключевых модулей без запуска бота и без вызова внешних API.
+Проверяет синтаксис и импорт ключевых модулей без запуска бота и без вызовов внешних API.
+
+## Главное меню бота
+
+| Кнопка / Команда | Действие |
+|---|---|
+| `/start` | Онбординг (макс пульс → цель → дни → силовые) |
+| `📅 Сегодня` | AI-рекомендация на день + план тренировки |
+| `🎯 Цель` | Выбор/смена беговой цели |
+| `👤 Профиль` | Просмотр профиля спортсмена |
+| `🔗 Подключить` | Подключение устройств (Web Connect UI — Phase 5) |
+| `📆 История` | Последние 7 дней рекомендаций |
+| `🔄 Синхронизация` | Загрузить данные с Garmin и WHOOP |
+| `⚙️ Настройки` | Учётные данные Garmin/WHOOP |
 
 ## Подключение устройств
 
 ### Garmin Connect
-1. Открой бота → ⚙️ Настройки → ⌚ Настроить Garmin
+1. `⚙️ Настройки` → `⌚ Настроить Garmin`
 2. Введи email и пароль от аккаунта Garmin Connect
-3. Нажми 🔄 Синхронизация → Garmin
+3. Нажми `🔄 Синхронизация`
+
+> При ошибке 429 (rate limit) запусти `python scripts/garmin_login.py` после cooldown.
 
 ### WHOOP
 1. Зарегистрируй приложение на [developer.whoop.com](https://developer.whoop.com)
-2. Укажи `Redirect URI` (например, через [ngrok](https://ngrok.com))
-3. Открой бота → ⚙️ Настройки → 💍 Подключить WHOOP
-4. Перейди по ссылке авторизации
-5. После редиректа скопируй `code` из URL и отправь боту: `/whoop_code КОД`
+2. Укажи `Redirect URI`
+3. `⚙️ Настройки` → `💍 Подключить WHOOP` → перейди по ссылке авторизации
+4. После редиректа скопируй `code` из URL и отправь боту: `/whoop_code КОД`
 
-## Команды бота
+## Статус разработки (Roadmap)
 
-| Команда/Кнопка | Действие |
-|---|---|
-| `/start` | Приветствие и главное меню |
-| `📊 Статистика` | Метрики за 7 дней |
-| `💤 Восстановление` | Анализ восстановления + AI |
-| `🏃 Бег` | Планы беговых тренировок |
-| `🚴 Велосипед` | Планы вело-тренировок |
-| `🏊 Плавание` | Планы по плаванию |
-| `💪 Силовые` | Силовые программы |
-| `🔄 Синхронизация` | Обновить данные с устройств |
-| `⚙️ Настройки` | Подключение устройств |
-| Любой текст | Вопрос AI-тренеру |
-| `/whoop_code КОД` | Завершить авторизацию WHOOP |
+| Фаза | Статус | Содержание |
+|---|---|---|
+| Phase 0 | ✅ Merged (PR #8, #9) | Baseline hygiene |
+| Phase 1 | ✅ Merged (PR #13) | AIProvider abstraction, OpenAI, Pydantic schemas |
+| Phase 2 | ✅ Merged (PR #14) | Data models (Profile, Recommendation, WorkoutCompletion) |
+| Phase 3 | 🟡 PR #15 | Telegram MVP: онбординг, Сегодня, История, Профиль |
+| Phase 4 | ⬜ Planned | Sync & Recommendation Engine |
+| Phase 5 | ⬜ Planned | Web Connect UI |
+| Phase 6 | ⬜ Planned | Webhook & Render deployment |
+| Phase 7 | ⬜ Planned | Hardening |
