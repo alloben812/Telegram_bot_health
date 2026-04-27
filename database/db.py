@@ -6,7 +6,6 @@ Sensitive fields are transparently encrypted/decrypted via security.py.
 Callers always work with plaintext values — encryption is an internal detail.
 """
 
-from __future__ import annotations
 import logging
 from datetime import datetime
 from sqlalchemy import text

@@ -7,7 +7,6 @@ using Fernet symmetric encryption via security.py.
 The raw plaintext values are NEVER persisted to disk.
 """
 
-from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 

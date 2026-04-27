@@ -31,7 +31,7 @@ Tasks:
 
 Verification:
 
-- Bot imports successfully.
+- `venv/bin/python scripts/check_baseline.py` passes.
 - Config validation behavior is understood.
 - No secrets or local DB/cache files are staged.
 
@@ -160,4 +160,3 @@ Verification:
 - Logs do not expose tokens, passwords, raw payloads, or API keys.
 - Failure modes are visible to the user where appropriate.
 - Critical services have tests or documented manual checks.
-
