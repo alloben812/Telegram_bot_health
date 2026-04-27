@@ -23,6 +23,7 @@ env/
 *.p12
 *.pfx
 secrets/
+.claude/settings.local.json
 
 # --- Database ---
 *.db
