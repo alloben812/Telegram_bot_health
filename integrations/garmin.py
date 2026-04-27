@@ -15,7 +15,6 @@ Token caching strategy:
 """
 
 import asyncio
-import json
 import logging
 import os
 import time
@@ -73,19 +72,12 @@ def _clear_cooldown(email: str) -> None:
         pass
 
 
-def _oauth2_token_valid(cache_dir: Path) -> bool:
-    """Check oauth2 token expiry from file without making any HTTP request."""
-    token_file = cache_dir / "oauth2_token.json"
-    if not token_file.exists():
+def _tokenstore_exists(cache_dir: Path) -> bool:
+    """Return True when a Garmin tokenstore directory has cached token files."""
+    if not cache_dir.is_dir():
         return False
     try:
-        data = json.loads(token_file.read_text())
-        expires_at = data.get("expires_at", 0)
-        # Consider valid if >5 minutes remain, OR if refresh_token exists
-        # (garth will auto-refresh using it)
-        if time.time() < float(expires_at) - 300:
-            return True
-        return bool(data.get("refresh_token"))
+        return any(path.is_file() for path in cache_dir.iterdir())
     except Exception:
         return False
 
@@ -126,22 +118,30 @@ class GarminClient:
         """Return a garminconnect client, using cached tokens whenever possible.
 
         Strategy (no unnecessary SSO hits):
-        1. If cache dir exists and has a refresh token → load it, trust it.
-           garth will silently refresh the access token when making API calls.
-        2. If no cache / tokens unreadable → check cooldown, then do full login.
+        1. If cache dir has token files → ask garminconnect to login using
+           tokenstore. It loads cached tokens and refreshes them when possible.
+        2. If no cache / tokens unusable → check cooldown, then do full login.
         3. On 429 → set cooldown and raise RuntimeError with wait time.
         """
         cache_dir = _cache_dir_for(email)
         client = garminconnect.Garmin(email, password)
 
         # ---- Step 1: try loading from cache ----
-        if _oauth2_token_valid(cache_dir):
+        if _tokenstore_exists(cache_dir):
             try:
-                client.garth.load(str(cache_dir))
-                logger.info("Garmin: loaded cached session for %s", email)
-                return client  # garth handles refresh lazily
+                client.login(tokenstore=str(cache_dir))
+                logger.info("Garmin: loaded tokenstore session for %s", email)
+                _clear_cooldown(email)
+                return client
             except Exception as exc:
-                logger.warning("Garmin: cache load failed (%s), will re-login", exc)
+                if "429" in str(exc):
+                    _set_cooldown(email)
+                    raise RuntimeError(
+                        "Garmin SSO вернул 429 (Too Many Requests). "
+                        "Кеш токенов не сработал, а повторный логин временно заблокирован. "
+                        "Подожди 60 мин перед следующей попыткой."
+                    ) from exc
+                logger.warning("Garmin: tokenstore login failed (%s), will re-login", exc)
 
         # ---- Step 2: check cooldown before hitting SSO ----
         wait = _check_cooldown(email)
@@ -156,7 +156,8 @@ class GarminClient:
         logger.info("Garmin: performing SSO login for %s", email)
         _set_cooldown(email)  # set before attempt so parallel calls are blocked
         try:
-            client.login()
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            client.login(tokenstore=str(cache_dir))
         except Exception as exc:
             err_str = str(exc)
             if "429" in err_str:
@@ -167,9 +168,7 @@ class GarminClient:
                 ) from exc
             raise
 
-        # Success — save tokens and clear cooldown
-        cache_dir.mkdir(parents=True, exist_ok=True)
-        client.garth.dump(str(cache_dir))
+        # Success — garminconnect saved tokens via tokenstore.
         _clear_cooldown(email)
         logger.info("Garmin: SSO login succeeded, tokens cached for %s", email)
         return client
