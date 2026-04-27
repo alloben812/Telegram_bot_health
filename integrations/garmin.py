@@ -7,9 +7,9 @@ Uses the garminconnect library (backed by garth) to fetch activities, sleep,
 training load, and VO2max from Garmin Connect.
 
 Token caching strategy:
-  - On first login, garth tokens are saved to .garth_cache/<email>/
-  - On subsequent calls, tokens are loaded from cache — no SSO request
-  - garth auto-refreshes OAuth2 access token using the refresh token
+  - On first login, garminconnect saves tokens to .garth_cache/<email>/
+  - On subsequent calls, tokens are loaded from tokenstore — no SSO request
+  - garminconnect auto-refreshes tokens when possible
   - Only when refresh token itself expires is a new SSO login needed
   - A cooldown file prevents hammering sso.garmin.com after a 429
 """
@@ -31,8 +31,32 @@ logger = logging.getLogger(__name__)
 # Directory to cache Garmin auth tokens — avoids re-login on every sync
 _GARTH_CACHE_DIR = Path(os.path.dirname(os.path.dirname(__file__))) / ".garth_cache"
 
-# Seconds to wait between SSO login attempts (Garmin bans for ~60 min on 429)
+# Local safety cooldown between SSO login attempts after Garmin returns 429.
+# Garmin does not document a fixed reset time; this only prevents retry storms.
 _LOGIN_COOLDOWN_S = 3600
+
+
+class GarminRateLimitError(RuntimeError):
+    """Raised when Garmin SSO rate-limits login attempts."""
+
+    def __init__(self, retry_after_seconds: int | None = None) -> None:
+        self.retry_after_seconds = retry_after_seconds
+        super().__init__(self.user_message())
+
+    def user_message(self) -> str:
+        if self.retry_after_seconds and self.retry_after_seconds > 0:
+            mins = max(1, self.retry_after_seconds // 60)
+            local_note = (
+                f"Локально мы заблокировали повторную попытку примерно на {mins} мин, "
+                "чтобы не усиливать ограничение."
+            )
+        else:
+            local_note = "Повторные попытки сейчас могут продлить ограничение."
+        return (
+            "Garmin временно ограничил логин (429 Too Many Requests). "
+            "Точный срок разблокировки Garmin не публикует. "
+            f"{local_note} Если есть сохраненный tokenstore, бот будет использовать его без нового SSO-логина."
+        )
 
 
 def _cache_dir_for(email: str) -> Path:
@@ -136,21 +160,13 @@ class GarminClient:
             except Exception as exc:
                 if "429" in str(exc):
                     _set_cooldown(email)
-                    raise RuntimeError(
-                        "Garmin SSO вернул 429 (Too Many Requests). "
-                        "Кеш токенов не сработал, а повторный логин временно заблокирован. "
-                        "Подожди 60 мин перед следующей попыткой."
-                    ) from exc
+                    raise GarminRateLimitError(_LOGIN_COOLDOWN_S) from exc
                 logger.warning("Garmin: tokenstore login failed (%s), will re-login", exc)
 
         # ---- Step 2: check cooldown before hitting SSO ----
         wait = _check_cooldown(email)
         if wait > 0:
-            mins = wait // 60
-            raise RuntimeError(
-                f"Garmin SSO временно заблокирован (429). "
-                f"Подожди ещё {mins} мин и попробуй снова."
-            )
+            raise GarminRateLimitError(wait)
 
         # ---- Step 3: full SSO login ----
         logger.info("Garmin: performing SSO login for %s", email)
@@ -161,11 +177,7 @@ class GarminClient:
         except Exception as exc:
             err_str = str(exc)
             if "429" in err_str:
-                raise RuntimeError(
-                    f"Garmin SSO вернул 429 (Too Many Requests). "
-                    f"Подожди 60 мин перед следующей попыткой. "
-                    f"Это ограничение Garmin, не наша ошибка."
-                ) from exc
+                raise GarminRateLimitError(_LOGIN_COOLDOWN_S) from exc
             raise
 
         # Success — garminconnect saved tokens via tokenstore.
