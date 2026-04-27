@@ -10,7 +10,7 @@ The raw plaintext values are NEVER persisted to disk.
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import BigInteger, DateTime, Float, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, Float, Integer, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -144,3 +144,137 @@ class TrainingPlan(Base):
     recovery_score_at_gen: Mapped[Optional[float]] = mapped_column(Float)
     hrv_at_gen: Mapped[Optional[float]] = mapped_column(Float)
     readiness_at_gen: Mapped[Optional[int]] = mapped_column(Integer)
+
+
+class UserTrainingProfile(Base):
+    """Athlete training profile: goals, HR zones, weekly limits.
+
+    One row per user. Created on first /start onboarding.
+    available_training_days — JSON list, e.g. '["mon","tue","thu","sat"]'
+    """
+
+    __tablename__ = "user_training_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+
+    # Heart rate
+    max_hr: Mapped[Optional[int]] = mapped_column(Integer)
+    max_hr_source: Mapped[Optional[str]] = mapped_column(String(16))  # manual|garmin|whoop
+
+    # Goal preset key, e.g. "run_10k_60"
+    active_goal_key: Mapped[Optional[str]] = mapped_column(String(32))
+
+    # Weekly schedule
+    available_training_days: Mapped[Optional[str]] = mapped_column(Text)  # JSON list
+    max_run_days_per_week: Mapped[Optional[int]] = mapped_column(Integer)
+    strength_days_per_week: Mapped[Optional[int]] = mapped_column(Integer)
+
+    # Onboarding completed flag
+    onboarding_done: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow
+    )
+
+
+class DailyRecommendationRecord(Base):
+    """Persisted structured daily recommendation from AI.
+
+    Stores validated DailyRecommendation JSON fields separately
+    for easy querying. Lists stored as JSON text.
+    source_data_hash — hash of the athlete context used to generate,
+    allows detecting when a re-generation is needed.
+    """
+
+    __tablename__ = "daily_recommendations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+
+    readiness_score: Mapped[Optional[int]] = mapped_column(Integer)
+    status_label: Mapped[Optional[str]] = mapped_column(String(128))
+    main_recommendation: Mapped[Optional[str]] = mapped_column(Text)
+
+    reasoning_json: Mapped[Optional[str]] = mapped_column(Text)   # JSON list
+    avoid_json: Mapped[Optional[str]] = mapped_column(Text)        # JSON list
+    control_json: Mapped[Optional[str]] = mapped_column(Text)      # JSON list
+    data_gaps_json: Mapped[Optional[str]] = mapped_column(Text)    # JSON list
+
+    confidence: Mapped[Optional[str]] = mapped_column(String(8))   # low|medium|high
+    source_data_hash: Mapped[Optional[str]] = mapped_column(String(64))
+
+    ai_provider: Mapped[Optional[str]] = mapped_column(String(32))
+    ai_model: Mapped[Optional[str]] = mapped_column(String(64))
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PlannedWorkoutRecord(Base):
+    """Planned workout linked to a daily recommendation.
+
+    blocks_json — JSON list of WorkoutBlock dicts.
+    status: proposed|accepted|completed|skipped
+    source: ai|coach|user
+    """
+
+    __tablename__ = "planned_workouts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    daily_recommendation_id: Mapped[Optional[int]] = mapped_column(Integer, index=True)
+    date: Mapped[str] = mapped_column(String(10), index=True)  # YYYY-MM-DD
+
+    sport: Mapped[str] = mapped_column(String(16))
+    title: Mapped[str] = mapped_column(String(256))
+    duration_minutes: Mapped[Optional[int]] = mapped_column(Integer)
+    intensity: Mapped[Optional[str]] = mapped_column(String(16))
+    blocks_json: Mapped[Optional[str]] = mapped_column(Text)  # JSON list
+
+    source: Mapped[str] = mapped_column(String(16), default="ai")
+    status: Mapped[str] = mapped_column(String(16), default="proposed")
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class WorkoutCompletion(Base):
+    """User feedback on a planned workout (Сделал / Не сделал + comment)."""
+
+    __tablename__ = "workout_completions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    planned_workout_id: Mapped[int] = mapped_column(Integer, index=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+
+    # done|skipped
+    completion_status: Mapped[str] = mapped_column(String(16))
+    comment: Mapped[Optional[str]] = mapped_column(Text)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class DeviceRawEvent(Base):
+    """Raw provider payload stored indefinitely for future re-analysis.
+
+    payload_hash (SHA-256 of plaintext JSON) prevents duplicate inserts
+    when the same sync runs multiple times.
+    payload_encrypted — Fernet-encrypted JSON payload.
+    """
+
+    __tablename__ = "device_raw_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+
+    provider: Mapped[str] = mapped_column(String(16))    # garmin|whoop
+    data_type: Mapped[str] = mapped_column(String(32))   # cycle|recovery|sleep|workout|activity
+    external_id: Mapped[Optional[str]] = mapped_column(String(64), index=True)
+
+    payload_encrypted: Mapped[str] = mapped_column(Text)
+    payload_hash: Mapped[str] = mapped_column(String(64), index=True)  # SHA-256 hex
+
+    source_timestamp: Mapped[Optional[str]] = mapped_column(String(32))  # ISO from provider
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    parser_version: Mapped[str] = mapped_column(String(8), default="1")

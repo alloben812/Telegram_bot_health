@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.future import select
 
 from config import config
-from database.models import Activity, Base, DailySnapshot, TrainingPlan, User
+from database.models import (
+    Activity, Base, DailySnapshot, TrainingPlan, User,
+    UserTrainingProfile, DailyRecommendationRecord,
+    PlannedWorkoutRecord, WorkoutCompletion, DeviceRawEvent,
+)
 from security import decrypt, decrypt_json, encrypt, encrypt_json
 
 logger = logging.getLogger(__name__)
@@ -496,3 +500,225 @@ async def get_latest_plan(user_id: int, sport: str) -> TrainingPlan | None:
             .limit(1)
         )
         return result.scalar_one_or_none()
+
+
+# ------------------------------------------------------------------ #
+# User training profile
+# ------------------------------------------------------------------ #
+
+
+async def get_training_profile(user_id: int) -> UserTrainingProfile | None:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(UserTrainingProfile).where(UserTrainingProfile.user_id == user_id)
+        )
+        return result.scalar_one_or_none()
+
+
+async def upsert_training_profile(
+    user_id: int,
+    max_hr: int | None = None,
+    max_hr_source: str | None = None,
+    active_goal_key: str | None = None,
+    available_training_days: list[str] | None = None,
+    max_run_days_per_week: int | None = None,
+    strength_days_per_week: int | None = None,
+    onboarding_done: bool | None = None,
+) -> UserTrainingProfile:
+    import json as _json
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(UserTrainingProfile).where(UserTrainingProfile.user_id == user_id)
+        )
+        profile = result.scalar_one_or_none()
+        if profile is None:
+            profile = UserTrainingProfile(user_id=user_id)
+            session.add(profile)
+
+        if max_hr is not None:
+            profile.max_hr = max_hr
+        if max_hr_source is not None:
+            profile.max_hr_source = max_hr_source
+        if active_goal_key is not None:
+            profile.active_goal_key = active_goal_key
+        if available_training_days is not None:
+            profile.available_training_days = _json.dumps(available_training_days)
+        if max_run_days_per_week is not None:
+            profile.max_run_days_per_week = max_run_days_per_week
+        if strength_days_per_week is not None:
+            profile.strength_days_per_week = strength_days_per_week
+        if onboarding_done is not None:
+            profile.onboarding_done = onboarding_done
+
+        profile.updated_at = datetime.utcnow()
+        await session.commit()
+        await session.refresh(profile)
+        return profile
+
+
+# ------------------------------------------------------------------ #
+# Daily recommendations & planned workouts
+# ------------------------------------------------------------------ #
+
+
+async def save_daily_recommendation(
+    user_id: int,
+    date: str,
+    rec: "DailyRecommendation",  # ai.schemas.DailyRecommendation
+    source_data_hash: str | None = None,
+    ai_provider: str = "openai",
+    ai_model: str = "gpt-4o",
+) -> tuple[DailyRecommendationRecord, PlannedWorkoutRecord]:
+    """Persist a validated DailyRecommendation. Returns (rec_record, workout_record)."""
+    import json as _json
+
+    async with SessionLocal() as session:
+        rec_record = DailyRecommendationRecord(
+            user_id=user_id,
+            date=date,
+            readiness_score=rec.readiness_score,
+            status_label=rec.status_label,
+            main_recommendation=rec.main_recommendation,
+            reasoning_json=_json.dumps(rec.reasoning, ensure_ascii=False),
+            avoid_json=_json.dumps(rec.avoid, ensure_ascii=False),
+            control_json=_json.dumps(rec.control, ensure_ascii=False),
+            data_gaps_json=_json.dumps(rec.data_gaps, ensure_ascii=False),
+            confidence=rec.confidence,
+            source_data_hash=source_data_hash,
+            ai_provider=ai_provider,
+            ai_model=ai_model,
+        )
+        session.add(rec_record)
+        await session.flush()  # get rec_record.id
+
+        w = rec.planned_workout
+        blocks = [b.model_dump() for b in w.blocks]
+        workout_record = PlannedWorkoutRecord(
+            user_id=user_id,
+            daily_recommendation_id=rec_record.id,
+            date=date,
+            sport=w.sport,
+            title=w.title,
+            duration_minutes=w.duration_minutes,
+            intensity=w.intensity,
+            blocks_json=_json.dumps(blocks, ensure_ascii=False),
+        )
+        session.add(workout_record)
+        await session.commit()
+        await session.refresh(rec_record)
+        await session.refresh(workout_record)
+        return rec_record, workout_record
+
+
+async def get_daily_recommendation(
+    user_id: int, date: str
+) -> DailyRecommendationRecord | None:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(DailyRecommendationRecord)
+            .where(
+                DailyRecommendationRecord.user_id == user_id,
+                DailyRecommendationRecord.date == date,
+            )
+            .order_by(DailyRecommendationRecord.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
+async def get_planned_workout(
+    user_id: int, date: str
+) -> PlannedWorkoutRecord | None:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(PlannedWorkoutRecord)
+            .where(
+                PlannedWorkoutRecord.user_id == user_id,
+                PlannedWorkoutRecord.date == date,
+            )
+            .order_by(PlannedWorkoutRecord.created_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
+
+async def get_recent_recommendations(
+    user_id: int, days: int = 7
+) -> list[DailyRecommendationRecord]:
+    from datetime import date as _date, timedelta
+    cutoff = (_date.today() - timedelta(days=days)).isoformat()
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(DailyRecommendationRecord)
+            .where(
+                DailyRecommendationRecord.user_id == user_id,
+                DailyRecommendationRecord.date >= cutoff,
+            )
+            .order_by(DailyRecommendationRecord.date.desc())
+        )
+        return list(result.scalars().all())
+
+
+async def save_workout_completion(
+    planned_workout_id: int,
+    user_id: int,
+    completion_status: str,  # done|skipped
+    comment: str | None = None,
+) -> WorkoutCompletion:
+    async with SessionLocal() as session:
+        completion = WorkoutCompletion(
+            planned_workout_id=planned_workout_id,
+            user_id=user_id,
+            completion_status=completion_status,
+            comment=comment,
+        )
+        session.add(completion)
+        await session.commit()
+        await session.refresh(completion)
+        return completion
+
+
+# ------------------------------------------------------------------ #
+# Device raw events
+# ------------------------------------------------------------------ #
+
+
+async def save_raw_event(
+    user_id: int,
+    provider: str,
+    data_type: str,
+    payload: dict,
+    external_id: str | None = None,
+    source_timestamp: str | None = None,
+    parser_version: str = "1",
+) -> bool:
+    """Store raw provider event. Returns True if inserted, False if duplicate."""
+    import hashlib
+    import json as _json
+
+    payload_str = _json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    payload_hash = hashlib.sha256(payload_str.encode()).hexdigest()
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(DeviceRawEvent).where(
+                DeviceRawEvent.user_id == user_id,
+                DeviceRawEvent.payload_hash == payload_hash,
+            )
+        )
+        if result.scalar_one_or_none():
+            return False  # duplicate
+
+        event = DeviceRawEvent(
+            user_id=user_id,
+            provider=provider,
+            data_type=data_type,
+            external_id=external_id,
+            payload_encrypted=encrypt_json(payload),
+            payload_hash=payload_hash,
+            source_timestamp=source_timestamp,
+            parser_version=parser_version,
+        )
+        session.add(event)
+        await session.commit()
+        return True
