@@ -30,6 +30,14 @@ from database.db import (
 logger = logging.getLogger(__name__)
 
 
+def _format_garmin_error(exc: Exception) -> str:
+    """Return a user-facing Garmin sync error."""
+    user_message = getattr(exc, "user_message", None)
+    if callable(user_message):
+        return user_message()
+    return str(exc)
+
+
 # ------------------------------------------------------------------ #
 # Helpers
 # ------------------------------------------------------------------ #
@@ -137,7 +145,7 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 await save_garmin_activities(user_id, today_acts)
         except Exception as exc:
             logger.error("Garmin sync error: %s", exc)
-            errors.append(f"⌚ Garmin: {exc}")
+            errors.append(f"⌚ Garmin: {_format_garmin_error(exc)}")
 
     # ---- WHOOP: latest cycle/recovery/sleep ----
     if action in ("whoop", "all"):
