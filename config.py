@@ -28,6 +28,10 @@ class Config:
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     CLAUDE_MODEL: str = "claude-sonnet-4-6"
 
+    # OpenAI
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
+
     # Database
     DATABASE_URL: str = os.getenv(
         "DATABASE_URL", "sqlite+aiosqlite:///./health_bot.db"

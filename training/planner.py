@@ -12,7 +12,7 @@ and recovery state (WHOOP).
 import logging
 from dataclasses import dataclass
 
-import anthropic
+import openai
 
 from config import config
 
@@ -116,18 +116,18 @@ class AthleteContext:
 
 
 _NO_KEY_MSG = (
-    "🔑 AI-функции недоступны: ANTHROPIC_API_KEY не настроен.\n"
+    "🔑 AI-функции недоступны: OPENAI_API_KEY не настроен.\n"
     "Добавь ключ в .env и перезапусти бота."
 )
 
 
 class TrainingPlanner:
-    """Generates training plans using the Anthropic Claude API."""
+    """Generates training plans using the OpenAI API."""
 
     def __init__(self) -> None:
         self._client = (
-            anthropic.AsyncAnthropic(api_key=config.ANTHROPIC_API_KEY)
-            if config.ANTHROPIC_API_KEY
+            openai.AsyncOpenAI(api_key=config.OPENAI_API_KEY)
+            if config.OPENAI_API_KEY
             else None
         )
 
@@ -158,13 +158,15 @@ class TrainingPlanner:
 5. В конце — краткий комментарий тренера по текущему состоянию спортсмена.\
 """
 
-        message = await self._client.messages.create(
-            model=config.CLAUDE_MODEL,
+        response = await self._client.chat.completions.create(
+            model=config.OPENAI_MODEL,
             max_tokens=2048,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
         )
-        return message.content[0].text
+        return response.choices[0].message.content or ""
 
     async def generate_single_session(
         self, sport: str, context: AthleteContext, session_type: str = "auto"
@@ -199,13 +201,15 @@ class TrainingPlanner:
 5. **Почему именно такая тренировка** — 2–3 предложения тренера\
 """
 
-        message = await self._client.messages.create(
-            model=config.CLAUDE_MODEL,
+        response = await self._client.chat.completions.create(
+            model=config.OPENAI_MODEL,
             max_tokens=1024,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
         )
-        return message.content[0].text
+        return response.choices[0].message.content or ""
 
     async def analyze_recovery(self, context: AthleteContext) -> str:
         """Analyse the athlete's current recovery state and give recommendations."""
@@ -221,13 +225,15 @@ class TrainingPlanner:
 4. Укажи, **какие виды тренировок** сегодня оптимальны, а каких следует избегать.\
 """
 
-        message = await self._client.messages.create(
-            model=config.CLAUDE_MODEL,
+        response = await self._client.chat.completions.create(
+            model=config.OPENAI_MODEL,
             max_tokens=800,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
         )
-        return message.content[0].text
+        return response.choices[0].message.content or ""
 
     async def answer_question(
         self, question: str, context: AthleteContext
@@ -241,13 +247,15 @@ class TrainingPlanner:
 **Вопрос спортсмена:** {question}\
 """
 
-        message = await self._client.messages.create(
-            model=config.CLAUDE_MODEL,
+        response = await self._client.chat.completions.create(
+            model=config.OPENAI_MODEL,
             max_tokens=800,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
         )
-        return message.content[0].text
+        return response.choices[0].message.content or ""
 
 
 # Module-level singleton
