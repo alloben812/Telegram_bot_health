@@ -44,6 +44,17 @@ The first MVP must focus on daily recommendations and today's planned workout, b
 - Backend calculates facts; AI interprets facts and proposes recommendations.
 - Keep provider-specific AI SDK code behind an `AIProvider` abstraction.
 
+## Max HR Detection Rule
+
+When determining the user's max HR from device data:
+
+- Take the **absolute maximum** value recorded across **all available snapshots** (not just today's).
+- Check all providers: WHOOP (`whoop_max_hr`), Garmin (when available), and any future sources.
+- Use the highest value seen across all days as the best proxy for true max HR.
+- Store both the value and the source (`whoop`, `garmin`, `manual`).
+- This applies during onboarding and whenever the system auto-updates max HR from device data.
+- Only values above 150 bpm are considered valid device-recorded max HR (avoids resting HR noise).
+
 ## Important Current Gaps
 
 The existing code and README still describe a Claude/Anthropic, polling, SQLite-first bot. The target MVP now uses:

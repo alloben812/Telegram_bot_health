@@ -67,6 +67,11 @@ class AthleteContext:
     garmin_vo2max: Optional[float] = None
     garmin_steps_today: Optional[int] = None
     garmin_body_battery: Optional[int] = None  # 0–100
+    garmin_stress_avg: Optional[int] = None   # 0–100
+    garmin_active_calories: Optional[int] = None
+
+    # Sleep duration from WHOOP
+    whoop_sleep_duration_h: Optional[float] = None
 
     # Weekly load by canonical sport type
     # e.g. {"run": {"count": 3, "duration_min": 120, "distance_km": 25.5}}
@@ -112,8 +117,15 @@ class AthleteContext:
         if self.whoop_respiratory_rate is not None:
             lines.append(f"- **Частота дыхания:** {self.whoop_respiratory_rate} вд/мин")
 
+        if self.whoop_sleep_duration_h is not None:
+            lines.append(f"- **Продолжительность сна:** {self.whoop_sleep_duration_h:.1f} ч")
+
         if self.garmin_training_readiness is not None:
             lines.append(f"- **Готовность (Garmin):** {self.garmin_training_readiness}/100")
+        if self.garmin_stress_avg is not None:
+            lines.append(f"- **Стресс (Garmin):** {self.garmin_stress_avg}/100")
+        if self.garmin_active_calories is not None:
+            lines.append(f"- **Активные калории (Garmin):** {self.garmin_active_calories} ккал")
         if self.garmin_vo2max is not None:
             lines.append(f"- **VO2max (Garmin):** {self.garmin_vo2max} мл/кг/мин")
         if self.garmin_body_battery is not None:

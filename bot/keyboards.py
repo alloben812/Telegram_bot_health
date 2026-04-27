@@ -3,15 +3,15 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup
 
 # ------------------------------------------------------------------ #
-# Main menu
+# Main menu (MVP)
 # ------------------------------------------------------------------ #
 
 MAIN_MENU_KB = ReplyKeyboardMarkup(
     [
-        ["📊 Статистика", "💤 Восстановление"],
-        ["🏃 Бег", "🚴 Велосипед"],
-        ["🏊 Плавание", "💪 Силовые"],
-        ["🔄 Синхронизация", "⚙️ Настройки"],
+        ["📅 Сегодня", "🎯 Цель"],
+        ["👤 Профиль", "🔗 Подключить"],
+        ["📆 История", "🔄 Синхронизация"],
+        ["⚙️ Настройки"],
     ],
     resize_keyboard=True,
     input_field_placeholder="Выберите действие…",
@@ -19,7 +19,44 @@ MAIN_MENU_KB = ReplyKeyboardMarkup(
 
 
 # ------------------------------------------------------------------ #
-# Plan type selection
+# Goal selection
+# ------------------------------------------------------------------ #
+
+GOAL_KB = InlineKeyboardMarkup(
+    [
+        [InlineKeyboardButton("🏃 10 км за 60 мин", callback_data="ob_goal:run_10k_60")],
+        [InlineKeyboardButton("🏃 Полумарафон за 2:20", callback_data="ob_goal:run_half_220")],
+        [InlineKeyboardButton("🏃 Марафон — финишировать", callback_data="ob_goal:run_marathon_finish")],
+    ]
+)
+
+# Separate keyboard for profile goal change (different prefix to avoid onboarding conflict)
+PROFILE_GOAL_KB = InlineKeyboardMarkup(
+    [
+        [InlineKeyboardButton("🏃 10 км за 60 мин", callback_data="set_goal:run_10k_60")],
+        [InlineKeyboardButton("🏃 Полумарафон за 2:20", callback_data="set_goal:run_half_220")],
+        [InlineKeyboardButton("🏃 Марафон — финишировать", callback_data="set_goal:run_marathon_finish")],
+    ]
+)
+
+
+# ------------------------------------------------------------------ #
+# Workout feedback
+# ------------------------------------------------------------------ #
+
+def workout_feedback_keyboard(workout_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✅ Сделал", callback_data=f"workout:done:{workout_id}"),
+                InlineKeyboardButton("❌ Не сделал", callback_data=f"workout:skipped:{workout_id}"),
+            ]
+        ]
+    )
+
+
+# ------------------------------------------------------------------ #
+# Plan type selection (legacy — kept for existing plan handlers)
 # ------------------------------------------------------------------ #
 
 def plan_type_keyboard(sport: str) -> InlineKeyboardMarkup:
@@ -65,21 +102,9 @@ SYNC_KB = InlineKeyboardMarkup(
 
 SETTINGS_KB = InlineKeyboardMarkup(
     [
-        [
-            InlineKeyboardButton(
-                "⌚ Настроить Garmin", callback_data="settings:garmin"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "💍 Подключить WHOOP", callback_data="settings:whoop"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "ℹ️ Статус подключений", callback_data="settings:status"
-            )
-        ],
+        [InlineKeyboardButton("⌚ Настроить Garmin", callback_data="settings:garmin")],
+        [InlineKeyboardButton("💍 Подключить WHOOP", callback_data="settings:whoop")],
+        [InlineKeyboardButton("ℹ️ Статус подключений", callback_data="settings:status")],
     ]
 )
 
