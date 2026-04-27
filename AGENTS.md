@@ -33,6 +33,7 @@ The first MVP must focus on daily recommendations and today's planned workout, b
 - Split work into reviewable tasks that can be reverted independently. Avoid both tiny noisy PRs and large multi-system rewrites.
 - Before starting git-backed work, ask whether to create a new branch from `main` or continue from the current git state.
 - Each implementation task should have a clear verification point: command, local flow, or documented manual check.
+- Each branch must be tested before PR. At minimum run the baseline check; if Telegram or web UI behavior changed, also run the app locally, inspect terminal logs, and have the user verify the UI in Telegram/browser with screenshots or a clear report.
 - Keep future multi-user support in mind, but do not overbuild before MVP behavior works.
 - Do not hard-code new single-user assumptions unless explicitly marked as MVP-only.
 - Preserve encrypted credential/token handling.
