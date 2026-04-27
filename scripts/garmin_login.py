@@ -39,9 +39,8 @@ cache_dir = Path(__file__).parent.parent / ".garth_cache" / safe
 
 try:
     client = garminconnect.Garmin(email, password)
-    client.login()
     cache_dir.mkdir(parents=True, exist_ok=True)
-    client.garth.dump(str(cache_dir))
+    client.login(tokenstore=str(cache_dir))
     print(f"✅ Токены сохранены в: {cache_dir}")
     print("\nПроверяем подключение...")
     name = client.get_full_name()
