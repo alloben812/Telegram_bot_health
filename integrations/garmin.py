@@ -105,11 +105,21 @@ class GarminClient:
         cache_dir = _cache_dir_for(email)
         cache_dir.mkdir(parents=True, exist_ok=True)
 
+        has_cache = any(cache_dir.glob("*.json"))
+
         client = garminconnect.Garmin(email, password)
         try:
-            client.login(tokenstore=str(cache_dir))
+            if has_cache:
+                client.login(tokenstore=str(cache_dir))
+                logger.info("Garmin: connected for %s (cached tokens)", email)
+            else:
+                client.login()
+                try:
+                    client.garth.dump(str(cache_dir))
+                    logger.info("Garmin: SSO login ok for %s, tokens saved", email)
+                except Exception:
+                    logger.warning("Garmin: could not save tokens for %s", email)
             _clear_cooldown(email)
-            logger.info("Garmin: connected for %s (cache or fresh SSO)", email)
             return client
         except garminconnect.GarminConnectTooManyRequestsError as exc:
             _set_cooldown(email)
