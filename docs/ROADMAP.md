@@ -4,6 +4,29 @@ This roadmap keeps changes reviewable and reversible. Each phase should normally
 
 Before starting any task, ask whether to create a new branch from `main` or continue from the current git state.
 
+## Branch Verification Rule
+
+Every branch needs an explicit verification checklist before PR.
+
+Minimum:
+
+- Run `venv/bin/python scripts/check_baseline.py`.
+- State whether app runtime was started.
+- State whether Telegram or web UI was manually checked.
+- Record any known untested area.
+
+For Telegram changes:
+
+- Run the bot locally.
+- Inspect terminal logs while the user exercises the flow in Telegram.
+- Use the user's screenshots or report as part of verification.
+
+For web changes:
+
+- Run the web app locally.
+- Inspect backend terminal logs while the user exercises the browser UI.
+- Use screenshots or a clear user report as part of verification.
+
 ## Task Size Rule
 
 Good task size:
