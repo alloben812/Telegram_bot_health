@@ -6,7 +6,6 @@ WHOOP API v1 integration (OAuth 2.0).
 Docs: https://developer.whoop.com/api
 """
 
-from __future__ import annotations
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any

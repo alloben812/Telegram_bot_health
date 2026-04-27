@@ -4,7 +4,6 @@ from __future__ import annotations
 /start command and settings handlers.
 """
 
-from __future__ import annotations
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update

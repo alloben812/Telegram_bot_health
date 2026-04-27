@@ -9,7 +9,6 @@ Both sources are independent:
   WHOOP   → Strain, HRV, recovery score, SpO2, skin temp, sleep quality
 """
 
-from __future__ import annotations
 import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
