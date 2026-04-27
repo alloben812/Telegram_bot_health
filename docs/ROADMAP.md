@@ -1,0 +1,163 @@
+# Implementation Roadmap
+
+This roadmap keeps changes reviewable and reversible. Each phase should normally be a separate branch and PR unless the user explicitly asks otherwise.
+
+Before starting any task, ask whether to create a new branch from `main` or continue from the current git state.
+
+## Task Size Rule
+
+Good task size:
+
+- One coherent behavior or architecture slice.
+- Can be reviewed in one sitting.
+- Can be reverted without breaking unrelated completed work.
+- Has a concrete verification step.
+
+Avoid:
+
+- Giant PRs that change bot UI, database, AI, integrations, and deploy at once.
+- Tiny PRs that only move one line without reducing risk.
+- Mixing refactors with behavior changes unless the refactor is required for that behavior.
+
+## Phase 0 - Baseline Hygiene
+
+Goal: make current state inspectable and safer to change.
+
+Tasks:
+
+1. Add or confirm basic local commands for running the bot and minimal import checks.
+2. Document current env variables and remove outdated provider assumptions where safe.
+3. Add a lightweight test/check command if none exists.
+
+Verification:
+
+- Bot imports successfully.
+- Config validation behavior is understood.
+- No secrets or local DB/cache files are staged.
+
+## Phase 1 - AI Provider Abstraction
+
+Goal: decouple planning logic from a specific provider.
+
+Tasks:
+
+1. Introduce provider-neutral interfaces and request/response models.
+2. Implement OpenAI as the first provider.
+3. Keep legacy planner behavior working until replacement is complete.
+4. Add validation for structured daily recommendation output.
+
+Verification:
+
+- Unit/import checks pass.
+- A mocked provider can return a valid structured recommendation.
+- Invalid AI JSON fails validation safely.
+
+## Phase 2 - Data Model Foundation
+
+Goal: add persistent structures needed for daily assistant without switching every runtime concern at once.
+
+Tasks:
+
+1. Add user training profile fields/entities: max HR, goal, available days, weekly limits.
+2. Add goal presets.
+3. Add daily recommendation and planned workout persistence.
+4. Add workout completion/comment persistence.
+5. Add raw device event storage with hash-based deduplication.
+
+Verification:
+
+- Local DB initializes or migrates.
+- Existing encrypted token behavior still works.
+- Duplicate raw payloads are not inserted repeatedly.
+
+## Phase 3 - Telegram MVP Flows
+
+Goal: expose the core MVP through Telegram while keeping existing flows stable where possible.
+
+Tasks:
+
+1. Implement `/start` onboarding: max HR, goal, training days, run days/week, strength/week.
+2. Implement menu buttons: Today, Goal, Profile, Connect, History.
+3. Implement Today using current available data and structured recommendation formatting.
+4. Implement 7-day History.
+5. Implement planned workout feedback: `Сделал`, `Не сделал`, comment.
+
+Verification:
+
+- Manual Telegram flow works locally.
+- User can complete onboarding once and not repeat it every time.
+- Today and History work when integrations are missing and when data exists.
+
+## Phase 4 - Sync and Recommendation Engine
+
+Goal: make recommendations data-driven and idempotent.
+
+Tasks:
+
+1. Normalize Garmin/WHOOP activities into common activity types.
+2. Calculate weekly load and volume by sport.
+3. Detect workouts already completed today.
+4. Build backend facts context for AI.
+5. Implement recommendation update policy for silent sync vs user notification.
+
+Verification:
+
+- Sync can run multiple times without duplicating raw events.
+- Garmin `429` does not trigger aggressive retry loops.
+- A workout detected after the morning recommendation can trigger a correction.
+
+## Phase 5 - Web Connect UI
+
+Goal: move sensitive connection flows out of regular Telegram dialogs.
+
+Tasks:
+
+1. Add one-time connect token model and service.
+2. Add Connect button that generates a web link.
+3. Add minimal Web Connect UI with Garmin and WHOOP cards.
+4. Add WHOOP OAuth callback through web backend.
+5. Add Garmin token/session-first connection handling.
+
+Verification:
+
+- Connect links expire and cannot be reused incorrectly.
+- Integration statuses show connected/not connected/error/last sync.
+- Tokens/credentials are encrypted.
+
+## Phase 6 - Webhook and Deployment MVP
+
+Goal: make the app run outside local polling.
+
+Tasks:
+
+1. Introduce FastAPI app entrypoint.
+2. Add Telegram webhook endpoint.
+3. Add protected internal sync/recommendation endpoints.
+4. Add Render deployment config.
+5. Add Neon Postgres configuration.
+6. Add GitHub Actions cron for sync/recommendation calls.
+
+Verification:
+
+- Local webhook app starts.
+- Protected endpoints reject missing/invalid secret.
+- Render deploy has required env variables documented.
+- GitHub Actions cron can call the intended endpoint.
+
+## Phase 7 - Hardening
+
+Goal: reduce operational and security risk before broader use.
+
+Tasks:
+
+1. Add structured logging without leaking raw health data or secrets.
+2. Add backup/export/delete planning for user data.
+3. Add error monitoring path.
+4. Add minimal test suite around critical services.
+
+Verification:
+
+- Logs do not expose tokens, passwords, raw payloads, or API keys.
+- Failure modes are visible to the user where appropriate.
+- Critical services have tests or documented manual checks.
+
