@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Communication Language
+
+Always communicate with the user in **Russian**. All responses, explanations, and questions must be in Russian.
+
 ## Running the Bot
 
 ```bash
