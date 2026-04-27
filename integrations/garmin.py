@@ -121,16 +121,29 @@ class GarminClient:
                     logger.warning("Garmin: could not save tokens for %s", email)
             _clear_cooldown(email)
             return client
-        except garminconnect.GarminConnectTooManyRequestsError as exc:
-            _set_cooldown(email)
-            raise RuntimeError(
-                "Garmin SSO вернул 429 (Too Many Requests). "
-                "Подожди 60 мин перед следующей попыткой."
-            ) from exc
-        except garminconnect.GarminConnectAuthenticationError as exc:
-            raise RuntimeError(
-                f"Garmin: ошибка авторизации — проверь email и пароль.\n{exc}"
-            ) from exc
+        except Exception as exc:
+            exc_str = str(exc)
+            is_429 = (
+                isinstance(exc, garminconnect.GarminConnectTooManyRequestsError)
+                or "429" in exc_str
+                or "Too Many Requests" in exc_str
+            )
+            is_auth = (
+                isinstance(exc, garminconnect.GarminConnectAuthenticationError)
+                or "401" in exc_str
+                or "authentication" in exc_str.lower()
+            )
+            if is_429:
+                _set_cooldown(email)
+                raise RuntimeError(
+                    "Garmin SSO вернул 429 (Too Many Requests). "
+                    "Подожди 60 мин перед следующей попыткой."
+                ) from exc
+            if is_auth:
+                raise RuntimeError(
+                    f"Garmin: ошибка авторизации — проверь email и пароль.\n{exc}"
+                ) from exc
+            raise RuntimeError(f"Garmin: ошибка подключения — {exc}") from exc
 
     def _ensure_connected(self) -> None:
         if self._client is None:
