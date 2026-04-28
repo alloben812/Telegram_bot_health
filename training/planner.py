@@ -27,10 +27,11 @@ _SPORT_LABELS = {
     "bike": "велосипед",
     "swim": "плавание",
     "strength": "силовые тренировки",
-    # legacy names kept for backward compat
-    "running": "бег",
-    "cycling": "велосипед",
-    "swimming": "плавание",
+    "hiit": "HIIT",
+    "walk": "ходьба",
+    "mobility": "мобильность/йога",
+    "other": "другое",
+    "rest": "отдых",
 }
 
 _SYSTEM_PROMPT = """\
@@ -62,6 +63,12 @@ class AthleteContext:
     # WHOOP 7-day trends
     hrv_7d_avg: Optional[float] = None
     sleep_7d_avg: Optional[float] = None
+
+    # Trends (computed from recent snapshots)
+    recovery_trend: Optional[str] = None  # "improving" / "stable" / "declining"
+    strain_7d_avg: Optional[float] = None
+    weekly_strain_total: Optional[float] = None
+    sleep_debt_h: Optional[float] = None  # negative = debt, positive = surplus
 
     # Garmin (None while on cooldown — planner works without it)
     garmin_training_readiness: Optional[int] = None  # 0–100
@@ -139,6 +146,29 @@ class AthleteContext:
 
         if self.hr_zones:
             lines.extend(self.hr_zones.to_prompt_lines())
+
+        # Trends section
+        trend_lines = []
+        if self.recovery_trend:
+            arrow = {"improving": "↗", "stable": "→", "declining": "↘"}.get(
+                self.recovery_trend, "→"
+            )
+            label = {"improving": "улучшается", "stable": "стабильно", "declining": "снижается"}.get(
+                self.recovery_trend, self.recovery_trend
+            )
+            trend_lines.append(f"- **Тренд восстановления:** {arrow} {label}")
+        if self.strain_7d_avg is not None:
+            trend_lines.append(f"- **Средний strain за 7д:** {self.strain_7d_avg:.1f}/21")
+        if self.weekly_strain_total is not None:
+            trend_lines.append(f"- **Суммарный strain за 7д:** {self.weekly_strain_total:.1f}")
+        if self.sleep_debt_h is not None:
+            if self.sleep_debt_h < 0:
+                trend_lines.append(f"- **Недосып за 7д:** {abs(self.sleep_debt_h):.1f} ч")
+            elif self.sleep_debt_h > 0:
+                trend_lines.append(f"- **Избыток сна за 7д:** {self.sleep_debt_h:.1f} ч")
+        if trend_lines:
+            lines.append("\n### Тренды за 7 дней\n")
+            lines.extend(trend_lines)
 
         if self.completed_today:
             lines.append(f"- **Выполнено сегодня:** {', '.join(self.completed_today)}")
