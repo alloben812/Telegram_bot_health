@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from config import config
 from database.db import (
     get_user,
+    update_garmin_oauth_token,
     update_user_garmin_credentials,
     update_user_whoop_token,
     validate_connect_token,
@@ -142,7 +143,9 @@ async def save_garmin(
         from integrations.garmin import GarminClient
         gc = GarminClient()
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: gc._create_client_for_user(email, password))
+        client = await loop.run_in_executor(
+            None, lambda: gc._create_client_for_user(email, password)
+        )
     except Exception as exc:
         logger.warning("Garmin test login failed for user %d: %s", user_id, exc)
         status = await _connection_status(user_id)
@@ -159,7 +162,15 @@ async def save_garmin(
         )
 
     await update_user_garmin_credentials(user_id, email, password)
-    logger.info("Garmin credentials saved via web for user %d", user_id)
+
+    # Save garth token to DB so Render can reuse it (no filesystem cache)
+    try:
+        token_b64 = client.garth.dumps()
+        await update_garmin_oauth_token(user_id, token_b64)
+        logger.info("Garmin credentials + token saved via web for user %d", user_id)
+    except Exception as exc:
+        logger.warning("Garmin token save failed for user %d: %s", user_id, exc)
+        logger.info("Garmin credentials saved via web for user %d", user_id)
 
     return RedirectResponse(
         url="/connect?success=Garmin+подключен",
