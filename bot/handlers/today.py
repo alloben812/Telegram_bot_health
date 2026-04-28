@@ -29,6 +29,7 @@ from database.db import (
     save_daily_recommendation,
     save_workout_completion,
 )
+from training.hr_zones import compute_hr_zones
 from training.planner import AthleteContext, planner
 
 logger = logging.getLogger(__name__)
@@ -51,8 +52,12 @@ _SPORT_EMOJI = {
 }
 
 
-def _build_context(snapshots: list, activities: list) -> AthleteContext:
+def _build_context(snapshots: list, activities: list, profile=None) -> AthleteContext:
     ctx = AthleteContext()
+
+    # HR zones from user profile
+    if profile and profile.max_hr:
+        ctx.hr_zones = compute_hr_zones(profile.max_hr)
 
     if snapshots:
         today_snap = snapshots[0]
@@ -214,6 +219,7 @@ async def today_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     # Build context from DB
     snapshots = await get_recent_snapshots(user_id, days=14)
     activities = await get_recent_activities(user_id, days=28)
+    profile = await get_training_profile(user_id)
 
     if not snapshots:
         await msg.edit_text(
@@ -223,7 +229,7 @@ async def today_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         )
         return
 
-    ctx = _build_context(snapshots, activities)
+    ctx = _build_context(snapshots, activities, profile)
 
     try:
         rec = await planner.generate_daily_recommendation(ctx)

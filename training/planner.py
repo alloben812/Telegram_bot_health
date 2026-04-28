@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from ai.provider import AIProvider
 from ai.schemas import DailyRecommendation
+from training.hr_zones import HRZones
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,9 @@ class AthleteContext:
     # Recent activities from DB (normalized format)
     recent_activities_db: Optional[list] = None
 
+    # HR zones computed from max_hr in training profile
+    hr_zones: Optional[HRZones] = None
+
     # Legacy fields kept for handlers that build context manually
     recent_activities: Optional[list] = None
     weekly_distance_km: Optional[float] = None
@@ -132,6 +136,9 @@ class AthleteContext:
             lines.append(f"- **Body Battery:** {self.garmin_body_battery}/100")
         if self.garmin_steps_today is not None:
             lines.append(f"- **Шаги сегодня:** {self.garmin_steps_today:,}")
+
+        if self.hr_zones:
+            lines.extend(self.hr_zones.to_prompt_lines())
 
         if self.completed_today:
             lines.append(f"- **Выполнено сегодня:** {', '.join(self.completed_today)}")

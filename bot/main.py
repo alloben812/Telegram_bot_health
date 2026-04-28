@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 async def post_init(application: Application) -> None:
     await init_db()
+    from bot.scheduler import register_jobs
+    register_jobs(application)
     logger.info("Bot started. Listening for user_id=%d", config.ADMIN_TELEGRAM_ID)
 
 
