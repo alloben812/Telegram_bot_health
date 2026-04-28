@@ -15,7 +15,7 @@ from sqlalchemy.future import select
 
 from config import config
 from database.models import (
-    Activity, Base, DailySnapshot, TrainingPlan, User,
+    Activity, Base, ConnectToken, DailySnapshot, TrainingPlan, User,
     UserTrainingProfile, DailyRecommendationRecord,
     PlannedWorkoutRecord, WorkoutCompletion, DeviceRawEvent,
 )
@@ -722,3 +722,53 @@ async def save_raw_event(
         session.add(event)
         await session.commit()
         return True
+
+
+# ------------------------------------------------------------------ #
+# Web connect tokens
+# ------------------------------------------------------------------ #
+
+
+async def create_connect_token(user_id: int, ttl_minutes: int = 15) -> str:
+    """Create a one-time connect token. Returns the raw (unhashed) token."""
+    import hashlib
+    import secrets
+    from datetime import timedelta
+
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    expires_at = datetime.utcnow() + timedelta(minutes=ttl_minutes)
+
+    async with SessionLocal() as session:
+        ct = ConnectToken(
+            user_id=user_id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+        )
+        session.add(ct)
+        await session.commit()
+
+    return raw_token
+
+
+async def validate_connect_token(raw_token: str) -> int | None:
+    """Validate and consume a connect token. Returns user_id or None."""
+    import hashlib
+
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(ConnectToken).where(
+                ConnectToken.token_hash == token_hash,
+                ConnectToken.used == False,
+                ConnectToken.expires_at > datetime.utcnow(),
+            )
+        )
+        ct = result.scalar_one_or_none()
+        if not ct:
+            return None
+
+        ct.used = True
+        await session.commit()
+        return ct.user_id
