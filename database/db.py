@@ -23,12 +23,22 @@ from security import decrypt, decrypt_json, encrypt, encrypt_json
 
 logger = logging.getLogger(__name__)
 
-_engine_kwargs: dict = {"echo": False}
-if config.DATABASE_NEEDS_SSL:
-    import ssl as _ssl
-    _ctx = _ssl.create_default_context()
-    _engine_kwargs["connect_args"] = {"ssl": _ctx}
-engine = create_async_engine(config.DATABASE_URL, **_engine_kwargs)
+def _make_engine():
+    import re
+    url = config.DATABASE_URL
+    kwargs: dict = {"echo": False}
+    # asyncpg does not accept sslmode — strip it and pass ssl via connect_args
+    if "asyncpg" in url and "sslmode" in url:
+        url = re.sub(r"[?&]sslmode=[^&]*", "", url)
+        # Restore leading '?' if query params remain after stripping
+        if "&" in url and "?" not in url.split("/")[-1]:
+            url = url.replace("&", "?", 1)
+        import ssl as _ssl
+        kwargs["connect_args"] = {"ssl": _ssl.create_default_context()}
+    logger.info("DB engine URL (masked): %s...%s", url[:30], url[-10:])
+    return create_async_engine(url, **kwargs)
+
+engine = _make_engine()
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
