@@ -51,8 +51,11 @@ async def init_db() -> None:
     """Create all tables if they don't exist, and migrate new columns."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    logger.info("Tables created / verified")
 
-    # Add new columns to existing tables (safe to run multiple times)
+    # Add new columns to existing tables (safe to run multiple times).
+    # Each ALTER runs in its own transaction — Postgres aborts the whole
+    # txn on error, so we cannot batch them.
     new_columns = [
         ("users", "garmin_oauth_token_enc", "TEXT"),
         ("users", "garmin_password_enc", "TEXT"),
@@ -68,14 +71,14 @@ async def init_db() -> None:
         ("daily_snapshots", "whoop_workout_count", "INTEGER"),
         ("activities", "whoop_strain", "FLOAT"),
     ]
-    async with engine.begin() as conn:
-        for table, col, col_type in new_columns:
-            try:
+    for table, col, col_type in new_columns:
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(
-                    text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                    text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}")
                 )
-            except Exception:
-                pass  # Column already exists
+        except Exception:
+            pass  # Column already exists (SQLite fallback)
 
     logger.info("Database initialised")
 
