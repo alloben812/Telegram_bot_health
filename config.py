@@ -34,9 +34,11 @@ class Config:
     OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
 
     # Database
-    DATABASE_URL: str = os.getenv(
+    _raw_db_url: str = os.getenv(
         "DATABASE_URL", "sqlite+aiosqlite:///./health_bot.db"
     )
+    # asyncpg uses 'ssl' not 'sslmode'
+    DATABASE_URL: str = _raw_db_url.replace("sslmode=", "ssl=")
 
     # Web Connect UI
     WEB_BASE_URL: str = os.getenv("WEB_BASE_URL", "http://localhost:8000")
