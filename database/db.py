@@ -41,7 +41,7 @@ def _make_engine():
     if url.startswith("postgresql://"):
         url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-    print(f"[DB] url={url[:35]}*** ssl={needs_ssl}", flush=True)
+    logger.info("DB engine: ssl=%s", needs_ssl)
     return create_async_engine(url, **kwargs)
 
 engine = _make_engine()
@@ -50,14 +50,9 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 async def init_db() -> None:
     """Create all tables if they don't exist, and migrate new columns."""
-    print(f"[init_db] Starting, tables in metadata: {list(Base.metadata.tables.keys())}", flush=True)
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        print("[init_db] create_all OK", flush=True)
-    except Exception as e:
-        print(f"[init_db] create_all FAILED: {e}", flush=True)
-        raise
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Tables created / verified")
 
     # Add new columns to existing tables (safe to run multiple times).
     # Each ALTER runs in its own transaction — Postgres aborts the whole
