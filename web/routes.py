@@ -186,7 +186,7 @@ async def whoop_auth_start(
     if not user_id:
         return RedirectResponse(url="/connect?error=Сессия+истекла")
 
-    state = generate_whoop_state(user_id)
+    state = await generate_whoop_state(user_id)
     params = urlencode({
         "client_id": config.WHOOP_CLIENT_ID,
         "redirect_uri": config.WHOOP_REDIRECT_URI,
@@ -220,7 +220,7 @@ async def whoop_callback(
             },
         )
 
-    user_id = verify_whoop_state(state)
+    user_id = await verify_whoop_state(state)
     if not user_id:
         return templates.TemplateResponse(
             "result.html",

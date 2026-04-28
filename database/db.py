@@ -18,6 +18,7 @@ from database.models import (
     Activity, Base, ConnectToken, DailySnapshot, TrainingPlan, User,
     UserTrainingProfile, DailyRecommendationRecord,
     PlannedWorkoutRecord, WorkoutCompletion, DeviceRawEvent,
+    WhoopOAuthState,
 )
 from security import decrypt, decrypt_json, encrypt, encrypt_json
 
@@ -91,6 +92,35 @@ async def init_db() -> None:
 # ------------------------------------------------------------------ #
 # Users
 # ------------------------------------------------------------------ #
+
+
+async def create_whoop_oauth_state(user_id: int, state: str, ttl_seconds: int = 600) -> None:
+    """Store a pending WHOOP OAuth state -> user_id mapping."""
+    expires = datetime.utcnow() + __import__("datetime").timedelta(seconds=ttl_seconds)
+    async with SessionLocal() as session:
+        obj = WhoopOAuthState(state=state, user_id=user_id, expires_at=expires)
+        session.add(obj)
+        await session.commit()
+
+
+async def verify_whoop_oauth_state(state: str) -> int | None:
+    """Look up and consume a WHOOP OAuth state. Returns user_id or None."""
+    from datetime import datetime as dt
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(WhoopOAuthState).where(WhoopOAuthState.state == state)
+        )
+        obj = result.scalar_one_or_none()
+        if obj is None:
+            return None
+        if obj.expires_at < dt.utcnow():
+            await session.delete(obj)
+            await session.commit()
+            return None
+        user_id = obj.user_id
+        await session.delete(obj)
+        await session.commit()
+        return user_id
 
 
 async def get_or_create_user(

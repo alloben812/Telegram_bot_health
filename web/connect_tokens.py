@@ -4,16 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import secrets
 import time
-from typing import Dict, Tuple
 
 from config import config
-from database.db import create_connect_token
-
-# In-memory store of pending WHOOP OAuth flows: user_id -> expires_at
-# Cleaned up on each verify call.
-_pending_whoop: Dict[int, float] = {}
-_WHOOP_STATE_TTL = 600  # 10 minutes
+from database.db import create_connect_token, create_whoop_oauth_state, verify_whoop_oauth_state
 
 
 async def generate_connect_url(user_id: int) -> str:
@@ -23,35 +18,21 @@ async def generate_connect_url(user_id: int) -> str:
     return f"{base}/connect?token={raw_token}"
 
 
-def generate_whoop_state(user_id: int) -> str:
-    """Register a pending WHOOP OAuth flow and return user_id as state.
+async def generate_whoop_state(user_id: int) -> str:
+    """Create a random state token and persist the mapping in DB.
 
-    WHOOP's OAuth server does not preserve complex state values —
-    it only returns the raw numeric string. So we just send user_id
-    and track the pending flow server-side.
+    WHOOP requires state >= 8 chars. We use secrets.token_urlsafe(24)
+    which produces ~32 URL-safe characters. The mapping is stored in
+    the database so it survives container restarts / redeploys.
     """
-    _pending_whoop[user_id] = time.time() + _WHOOP_STATE_TTL
-    return str(user_id)
+    state = secrets.token_urlsafe(24)
+    await create_whoop_oauth_state(user_id, state)
+    return state
 
 
-def verify_whoop_state(state: str) -> int | None:
-    """Verify WHOOP OAuth state. Returns user_id or None."""
-    # Clean expired entries
-    now = time.time()
-    expired = [k for k, v in _pending_whoop.items() if v < now]
-    for k in expired:
-        del _pending_whoop[k]
-
-    try:
-        user_id = int(state)
-    except ValueError:
-        return None
-
-    if user_id in _pending_whoop:
-        del _pending_whoop[user_id]
-        return user_id
-
-    return None
+async def verify_whoop_state(state: str) -> int | None:
+    """Look up state in DB, return user_id or None. Single-use."""
+    return await verify_whoop_oauth_state(state)
 
 
 def make_session_cookie(user_id: int) -> str:
