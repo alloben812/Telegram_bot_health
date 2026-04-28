@@ -44,12 +44,15 @@ async def main():
     )
     server = uvicorn.Server(uv_config)
 
+    # Explicitly init DB before bot starts (post_init may not fire
+    # when we manage the event loop ourselves)
+    from database.db import init_db
+    print("[run.py] Calling init_db...", flush=True)
+    await init_db()
+    print("[run.py] init_db done", flush=True)
+
     # Initialize bot (but don't call run_polling — we manage the loop)
     await bot_app.initialize()
-    # post_init is only called automatically by run_polling/run_webhook,
-    # so we call it explicitly when managing the loop ourselves.
-    if bot_app.post_init:
-        await bot_app.post_init(bot_app)
     await bot_app.start()
     await bot_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
     logger.info("Telegram polling started for user_id=%d", config.ADMIN_TELEGRAM_ID)
