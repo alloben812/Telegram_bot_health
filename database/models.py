@@ -255,6 +255,23 @@ class WorkoutCompletion(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ConnectToken(Base):
+    """One-time web connect token for device linking.
+
+    Raw token is never stored — only SHA-256 hash.
+    Tokens expire after 15 minutes and are single-use.
+    """
+
+    __tablename__ = "connect_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class DeviceRawEvent(Base):
     """Raw provider payload stored indefinitely for future re-analysis.
 

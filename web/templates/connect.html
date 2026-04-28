@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect Devices</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f0f; color: #e0e0e0; padding: 20px;
+            max-width: 600px; margin: 0 auto;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 24px; text-align: center; }
+        .card {
+            background: #1a1a1a; border-radius: 12px; padding: 20px;
+            margin-bottom: 16px; border: 1px solid #2a2a2a;
+        }
+        .card-header {
+            display: flex; align-items: center; gap: 10px;
+            margin-bottom: 12px; font-size: 1.1rem; font-weight: 600;
+        }
+        .status {
+            display: inline-block; padding: 4px 10px; border-radius: 6px;
+            font-size: 0.8rem; font-weight: 500;
+        }
+        .status-ok { background: #1a3a1a; color: #4ade80; }
+        .status-none { background: #3a1a1a; color: #f87171; }
+        .last-sync { font-size: 0.8rem; color: #888; margin-top: 4px; }
+        form { margin-top: 12px; }
+        label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 4px; }
+        input[type="email"], input[type="password"] {
+            width: 100%; padding: 10px; border-radius: 8px;
+            border: 1px solid #333; background: #111; color: #fff;
+            font-size: 1rem; margin-bottom: 10px;
+        }
+        .btn {
+            display: inline-block; padding: 10px 20px; border-radius: 8px;
+            font-size: 1rem; font-weight: 500; text-decoration: none;
+            cursor: pointer; border: none; text-align: center; width: 100%;
+        }
+        .btn-green { background: #22c55e; color: #000; }
+        .btn-blue { background: #3b82f6; color: #fff; }
+        .btn-green:hover { background: #16a34a; }
+        .btn-blue:hover { background: #2563eb; }
+        .flash {
+            padding: 10px 14px; border-radius: 8px; margin-bottom: 16px;
+            font-size: 0.9rem;
+        }
+        .flash-ok { background: #1a3a1a; color: #4ade80; border: 1px solid #2a4a2a; }
+        .flash-err { background: #3a1a1a; color: #f87171; border: 1px solid #4a2a2a; }
+        .note { font-size: 0.8rem; color: #666; margin-top: 8px; }
+    </style>
+</head>
+<body>
+    <h1>Подключение устройств</h1>
+
+    {% if success %}
+    <div class="flash flash-ok">{{ success }}</div>
+    {% endif %}
+    {% if error %}
+    <div class="flash flash-err">{{ error }}</div>
+    {% endif %}
+
+    <!-- Garmin -->
+    <div class="card">
+        <div class="card-header">
+            <span>&#9201;</span> Garmin Connect
+            {% if garmin_connected %}
+            <span class="status status-ok">Подключено</span>
+            {% else %}
+            <span class="status status-none">Не подключено</span>
+            {% endif %}
+        </div>
+        {% if garmin_connected %}
+        <div>{{ garmin_email }}</div>
+        <div class="last-sync">Последний синк: {{ garmin_last_sync or 'неизвестно' }}</div>
+        <details style="margin-top:12px;">
+            <summary style="cursor:pointer; color:#888; font-size:0.85rem;">Переподключить</summary>
+            <form method="post" action="/connect/garmin" style="margin-top:10px;">
+                <label>Email</label>
+                <input type="email" name="email" value="{{ garmin_email or '' }}" required>
+                <label>Пароль</label>
+                <input type="password" name="password" required>
+                <button type="submit" class="btn btn-green">Обновить</button>
+            </form>
+            <p class="note">Новый логин вызовет авторизацию в Garmin — при частых попытках сервер может временно заблокировать доступ.</p>
+        </details>
+        {% else %}
+        <form method="post" action="/connect/garmin">
+            <label>Email</label>
+            <input type="email" name="email" required>
+            <label>Пароль</label>
+            <input type="password" name="password" required>
+            <button type="submit" class="btn btn-green">Подключить</button>
+        </form>
+        <p class="note">Логин/пароль от Garmin Connect. Хранятся зашифрованными.</p>
+        {% endif %}
+    </div>
+
+    <!-- WHOOP -->
+    <div class="card">
+        <div class="card-header">
+            <span>&#128141;</span> WHOOP
+            {% if whoop_connected %}
+            <span class="status status-ok">Подключено</span>
+            {% else %}
+            <span class="status status-none">Не подключено</span>
+            {% endif %}
+        </div>
+        {% if whoop_connected %}
+        <div class="last-sync">Последний синк: {{ whoop_last_sync or 'неизвестно' }}</div>
+        {% endif %}
+        <a href="/auth/whoop" class="btn btn-blue" style="display:block; margin-top:12px;">
+            {{ 'Переподключить' if whoop_connected else 'Подключить WHOOP' }}
+        </a>
+        <p class="note">Авторизация через официальный WHOOP OAuth.</p>
+    </div>
+
+    <p class="note" style="text-align:center; margin-top:20px;">
+        После подключения вернись в Telegram.
+    </p>
+</body>
+</html>

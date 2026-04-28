@@ -85,13 +85,30 @@ async def goal_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def connect_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await update.message.reply_text(
-        "🔗 *Подключение устройств*\n\n"
-        "Используй ⚙️ Настройки для подключения Garmin и WHOOP.\n\n"
-        "_Web Connect UI появится в следующей фазе._",
-        parse_mode="Markdown",
-        reply_markup=MAIN_MENU_KB,
-    )
+    from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    from web.connect_tokens import generate_connect_url
+
+    url = await generate_connect_url(update.effective_user.id)
+
+    # Telegram inline buttons require HTTPS URLs
+    if url.startswith("https://"):
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton("🌐 Открыть в браузере", url=url)]
+        ])
+        await update.message.reply_text(
+            "🔗 *Подключение устройств*\n\n"
+            "Нажми кнопку ниже — откроется страница для подключения Garmin и WHOOP.\n"
+            "Ссылка действует 15 минут.",
+            parse_mode="Markdown",
+            reply_markup=keyboard,
+        )
+    else:
+        # Local dev: send URL as plain text (inline buttons reject http://)
+        await update.message.reply_text(
+            "🔗 Подключение устройств\n\n"
+            f"Открой в браузере:\n{url}\n\n"
+            "Ссылка действует 15 минут.",
+        )
 
 
 def get_profile_handlers():
