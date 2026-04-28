@@ -46,6 +46,10 @@ async def main():
 
     # Initialize bot (but don't call run_polling — we manage the loop)
     await bot_app.initialize()
+    # post_init is only called automatically by run_polling/run_webhook,
+    # so we call it explicitly when managing the loop ourselves.
+    if bot_app.post_init:
+        await bot_app.post_init(bot_app)
     await bot_app.start()
     await bot_app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
     logger.info("Telegram polling started for user_id=%d", config.ADMIN_TELEGRAM_ID)
