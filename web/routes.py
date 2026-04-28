@@ -224,6 +224,15 @@ async def whoop_callback(
         )
 
     user_id = await verify_whoop_state(state)
+    # Fallback: old Telegram flow sends state=str(user_id)
+    if not user_id:
+        try:
+            candidate = int(state)
+            from database.db import get_user
+            if await get_user(candidate):
+                user_id = candidate
+        except (ValueError, TypeError):
+            pass
     if not user_id:
         return templates.TemplateResponse(
             "result.html",
