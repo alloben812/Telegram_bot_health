@@ -19,11 +19,13 @@ from telegram.ext import CallbackQueryHandler, ContextTypes
 from bot.keyboards import SYNC_KB
 from config import config
 from database.db import (
+    get_garmin_oauth_token,
     get_garmin_password,
     get_user,
     get_whoop_token,
     save_garmin_activities,
     save_whoop_workouts,
+    update_garmin_oauth_token,
     update_user_whoop_token,
     upsert_daily_snapshot,
 )
@@ -56,8 +58,17 @@ def _date_str(ts: str) -> str:
 
 
 async def _build_garmin_client(user):
-    """Login to Garmin with cached session, return GarminClient."""
+    """Login to Garmin with cached session, return GarminClient.
+
+    Priority:
+    1. DB-stored garth token (works on Render where filesystem is ephemeral)
+    2. File-based tokenstore cache (works locally)
+    3. Full SSO login (last resort, risks 429)
+
+    After successful login, the garth token is saved back to DB.
+    """
     from integrations.garmin import GarminClient
+    import garminconnect
 
     db_email = user.garmin_email
     db_password = get_garmin_password(user) if db_email else None
@@ -72,11 +83,39 @@ async def _build_garmin_client(user):
 
     gc = GarminClient()
 
+    # Try DB-stored garth token first (critical for Render where no filesystem cache)
+    db_token_b64 = get_garmin_oauth_token(user)
+    if db_token_b64:
+        try:
+            client = garminconnect.Garmin(email, password)
+            client.garth.loads(db_token_b64)
+            # Verify the token works by fetching display name
+            client.display_name = client.garth.profile["displayName"]
+            client.full_name = client.garth.profile["fullName"]
+            gc._client = client
+            logger.info("Garmin: loaded session from DB token for %s", email)
+            # Save refreshed token back
+            fresh_b64 = client.garth.dumps()
+            await update_garmin_oauth_token(user.id, fresh_b64)
+            return gc
+        except Exception as exc:
+            logger.warning("Garmin: DB token login failed (%s), falling back", exc)
+
+    # Fall back to file cache / full login
     def _login():
         return gc._create_client_for_user(email, password)
 
     loop = asyncio.get_event_loop()
     gc._client = await loop.run_in_executor(None, _login)
+
+    # Save token to DB for next time (especially important on Render)
+    try:
+        fresh_b64 = gc._client.garth.dumps()
+        await update_garmin_oauth_token(user.id, fresh_b64)
+        logger.info("Garmin: saved fresh token to DB for %s", email)
+    except Exception as exc:
+        logger.warning("Garmin: failed to save token to DB: %s", exc)
+
     return gc
 
 

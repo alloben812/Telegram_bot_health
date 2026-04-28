@@ -34,6 +34,7 @@ Telegram_bot_health/
 │   ├── main.py              # Точка входа, регистрация хэндлеров
 │   ├── auth.py              # AuthMiddleware (только ADMIN_TELEGRAM_ID)
 │   ├── keyboards.py         # Главное меню, Goal KB, Workout feedback KB
+│   ├── scheduler.py         # Cron-джобы: утренний push, авто-синк 4x/день
 │   └── handlers/
 │       ├── onboarding.py    # /start, ConversationHandler (4 шага)
 │       ├── today.py         # 📅 Сегодня — AI рекомендация
@@ -46,12 +47,21 @@ Telegram_bot_health/
 │   └── whoop.py             # WHOOP API (OAuth 2.0, auto-refresh)
 ├── training/
 │   ├── planner.py           # TrainingPlanner, AthleteContext
+│   ├── sports.py            # Нормализация спортов, дедупликация Garmin/WHOOP
 │   └── goals.py             # GoalPreset пресеты (3 MVP цели)
+├── web/
+│   ├── routes.py            # FastAPI: healthcheck, WHOOP OAuth callback
+│   ├── connect_tokens.py    # Токены подключения устройств
+│   └── templates/
+│       └── connect.html     # Web Connect UI для Garmin/WHOOP
 ├── database/
 │   ├── models.py            # ORM-модели (User, Snapshot, Profile, Recommendation…)
 │   └── db.py                # CRUD + шифрование токенов (Fernet)
 ├── security.py              # Fernet encryption (PBKDF2 от SECRET_KEY)
 ├── config.py                # Конфигурация из .env
+├── run.py                   # Entrypoint (Telegram bot + FastAPI web server)
+├── Dockerfile               # Python 3.12-slim, non-root user
+├── render.yaml              # Render deployment blueprint
 ├── scripts/
 │   ├── check_baseline.py    # Базовая проверка синтаксиса/импортов
 │   └── garmin_login.py      # Ручная авторизация Garmin (при 429 cooldown)
@@ -107,6 +117,29 @@ cp .env.example .env
 python -m bot.main
 ```
 
+## Деплой (Render + Neon Postgres)
+
+Бот задеплоен на **Render** (Free Web Service) с базой данных **Neon Postgres**.
+
+### Архитектура деплоя
+
+- `run.py` запускает Telegram polling + FastAPI web server параллельно
+- FastAPI обслуживает healthcheck (`/health`), WHOOP OAuth callback, Web Connect UI
+- Render пингует `/health` для keep-alive
+- БД: Neon Postgres (бесплатный tier), подключение через `asyncpg` + SSL
+- Garmin OAuth токены хранятся зашифрованно в БД (не на файловой системе)
+
+### Environment Variables на Render
+
+Все обязательные переменные из таблицы выше + `DATABASE_URL` (Neon connection string).
+
+### Ручной деплой
+
+```bash
+# Render деплоит автоматически при push в настроенную ветку
+git push origin main
+```
+
 ## Локальная проверка
 
 ```bash
@@ -154,6 +187,6 @@ venv/bin/python scripts/check_baseline.py
 | Phase 4 | ✅ Merged (PR #17) | Проактивный push 07:00, авто-синк 4x/день, HR зоны |
 | **Pre-Phase 5** | ✅ Done | Render + Neon + WHOOP redirect URI |
 | Phase 5 | ✅ Merged (PR #19) | FastAPI + Web Connect UI (Garmin, WHOOP OAuth) |
-| Phase 6 | 🟡 In progress | Деплой: Render + Neon Postgres + Dockerfile |
-| Phase 7 | ⬜ Planned | AI quality: коррекция рекомендации, prompt-тюнинг |
-| Phase 8 | ⬜ Planned | Hardening: логи, мониторинг, тесты |
+| Phase 6 | ✅ Merged (PR #20, #21) | Деплой: Render + Neon Postgres + Dockerfile |
+| Phase 4+ | 🟡 In progress (PR #22) | AI quality: нормализация спортов, тренды, авто-детект тренировок |
+| Phase 7 | ⬜ Planned | Hardening: логи, мониторинг, тесты |
