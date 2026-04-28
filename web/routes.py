@@ -187,6 +187,7 @@ async def whoop_auth_start(
         return RedirectResponse(url="/connect?error=Сессия+истекла")
 
     state = await generate_whoop_state(user_id)
+    print(f"[WHOOP] Generated state={state} for user_id={user_id}", flush=True)
     params = urlencode({
         "client_id": config.WHOOP_CLIENT_ID,
         "redirect_uri": config.WHOOP_REDIRECT_URI,
@@ -194,7 +195,9 @@ async def whoop_auth_start(
         "scope": "offline read:recovery read:cycles read:sleep read:workout read:profile read:body_measurement",
         "state": state,
     })
-    return RedirectResponse(url=f"{config.WHOOP_AUTH_URL}?{params}")
+    redirect_url = f"{config.WHOOP_AUTH_URL}?{params}"
+    print(f"[WHOOP] Redirect URL state param: {state}", flush=True)
+    return RedirectResponse(url=redirect_url)
 
 
 # ------------------------------------------------------------------ #
