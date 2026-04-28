@@ -152,8 +152,8 @@ venv/bin/python scripts/check_baseline.py
 | Phase 2 | ✅ Merged (PR #14) | Data models (Profile, Recommendation, WorkoutCompletion) |
 | Phase 3 | ✅ Merged (PR #15, #16) | Telegram MVP: онбординг, Сегодня, История, Профиль |
 | Phase 4 | ✅ Merged (PR #17) | Проактивный push 07:00, авто-синк 4x/день, HR зоны |
-| **Pre-Phase 5** | ⏳ Manual | Render + Neon + WHOOP redirect URI (см. ROADMAP.md) |
-| Phase 5 | ⬜ Planned | FastAPI + Web Connect UI (Garmin, WHOOP OAuth) |
-| Phase 6 | ⬜ Planned | Деплой: Render + Neon Postgres + webhook + GitHub Actions |
+| **Pre-Phase 5** | ✅ Done | Render + Neon + WHOOP redirect URI |
+| Phase 5 | ✅ Merged (PR #19) | FastAPI + Web Connect UI (Garmin, WHOOP OAuth) |
+| Phase 6 | 🟡 In progress | Деплой: Render + Neon Postgres + Dockerfile |
 | Phase 7 | ⬜ Planned | AI quality: коррекция рекомендации, prompt-тюнинг |
 | Phase 8 | ⬜ Planned | Hardening: логи, мониторинг, тесты |

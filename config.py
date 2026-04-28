@@ -1,7 +1,12 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
+# Local .env first, then Render Secret File as fallback
 load_dotenv()
+_render_env = Path("/etc/secrets/.env")
+if _render_env.exists():
+    load_dotenv(_render_env, override=False)
 
 
 class Config:
@@ -35,7 +40,7 @@ class Config:
 
     # Web Connect UI
     WEB_BASE_URL: str = os.getenv("WEB_BASE_URL", "http://localhost:8000")
-    WEB_PORT: int = int(os.getenv("WEB_PORT", "8000"))
+    WEB_PORT: int = int(os.getenv("PORT", os.getenv("WEB_PORT", "8000")))
 
     def validate(self) -> None:
         """Raise on missing required keys so the bot fails fast at startup."""
