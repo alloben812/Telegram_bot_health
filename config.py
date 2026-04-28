@@ -35,7 +35,7 @@ class Config:
 
     # Web Connect UI
     WEB_BASE_URL: str = os.getenv("WEB_BASE_URL", "http://localhost:8000")
-    WEB_PORT: int = int(os.getenv("WEB_PORT", "8000"))
+    WEB_PORT: int = int(os.getenv("PORT", os.getenv("WEB_PORT", "8000")))
 
     def validate(self) -> None:
         """Raise on missing required keys so the bot fails fast at startup."""
