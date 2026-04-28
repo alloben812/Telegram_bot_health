@@ -104,6 +104,7 @@ async def connect_page(
         "connect.html",
         {
             "request": request,
+            "user_id": user_id,
             **status,
             "success": success,
             "error": error,
@@ -149,6 +150,7 @@ async def save_garmin(
             "connect.html",
             {
                 "request": request,
+                "user_id": user_id,
                 **status,
                 "garmin_email": email,
                 "error": f"Не удалось подключиться к Garmin: {exc}",
@@ -172,9 +174,15 @@ async def save_garmin(
 
 @router.get("/auth/whoop")
 async def whoop_auth_start(
+    uid: int = Query(default=0),
     hb_session: str | None = Cookie(default=None),
 ):
     user_id = _get_user_id(hb_session)
+
+    # Fallback: accept uid from query param (link from connect page)
+    if not user_id and uid:
+        user_id = uid
+
     if not user_id:
         return RedirectResponse(url="/connect?error=Сессия+истекла")
 
