@@ -272,6 +272,16 @@ class ConnectToken(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class WhoopOAuthState(Base):
+    """Pending WHOOP OAuth flow — maps random state token to user_id."""
+
+    __tablename__ = "whoop_oauth_states"
+
+    state: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
 class DeviceRawEvent(Base):
     """Raw provider payload stored indefinitely for future re-analysis.
 

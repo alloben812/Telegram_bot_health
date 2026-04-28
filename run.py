@@ -44,6 +44,11 @@ async def main():
     )
     server = uvicorn.Server(uv_config)
 
+    # Explicitly init DB before bot starts (post_init may not fire
+    # when we manage the event loop ourselves)
+    from database.db import init_db
+    await init_db()
+
     # Initialize bot (but don't call run_polling — we manage the loop)
     await bot_app.initialize()
     await bot_app.start()

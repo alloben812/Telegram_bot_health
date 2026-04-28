@@ -18,12 +18,33 @@ from database.models import (
     Activity, Base, ConnectToken, DailySnapshot, TrainingPlan, User,
     UserTrainingProfile, DailyRecommendationRecord,
     PlannedWorkoutRecord, WorkoutCompletion, DeviceRawEvent,
+    WhoopOAuthState,
 )
 from security import decrypt, decrypt_json, encrypt, encrypt_json
 
 logger = logging.getLogger(__name__)
 
-engine = create_async_engine(config.DATABASE_URL, echo=False)
+def _make_engine():
+    import re
+    url = config.DATABASE_URL
+    kwargs: dict = {"echo": False}
+
+    needs_ssl = "sslmode" in url
+    if needs_ssl:
+        url = re.sub(r"[?&]sslmode=[^&]*", "", url)
+        if "&" in url and "?" not in url.split("/")[-1]:
+            url = url.replace("&", "?", 1)
+        import ssl as _ssl
+        kwargs["connect_args"] = {"ssl": _ssl.create_default_context()}
+
+    # Ensure async driver for postgresql
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    logger.info("DB engine: ssl=%s", needs_ssl)
+    return create_async_engine(url, **kwargs)
+
+engine = _make_engine()
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
@@ -31,8 +52,11 @@ async def init_db() -> None:
     """Create all tables if they don't exist, and migrate new columns."""
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    logger.info("Tables created / verified")
 
-    # Add new columns to existing tables (safe to run multiple times)
+    # Add new columns to existing tables (safe to run multiple times).
+    # Each ALTER runs in its own transaction — Postgres aborts the whole
+    # txn on error, so we cannot batch them.
     new_columns = [
         ("users", "garmin_oauth_token_enc", "TEXT"),
         ("users", "garmin_password_enc", "TEXT"),
@@ -48,14 +72,14 @@ async def init_db() -> None:
         ("daily_snapshots", "whoop_workout_count", "INTEGER"),
         ("activities", "whoop_strain", "FLOAT"),
     ]
-    async with engine.begin() as conn:
-        for table, col, col_type in new_columns:
-            try:
+    for table, col, col_type in new_columns:
+        try:
+            async with engine.begin() as conn:
                 await conn.execute(
-                    text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                    text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {col_type}")
                 )
-            except Exception:
-                pass  # Column already exists
+        except Exception:
+            pass  # Column already exists (SQLite fallback)
 
     logger.info("Database initialised")
 
@@ -63,6 +87,35 @@ async def init_db() -> None:
 # ------------------------------------------------------------------ #
 # Users
 # ------------------------------------------------------------------ #
+
+
+async def create_whoop_oauth_state(user_id: int, state: str, ttl_seconds: int = 600) -> None:
+    """Store a pending WHOOP OAuth state -> user_id mapping."""
+    expires = datetime.utcnow() + __import__("datetime").timedelta(seconds=ttl_seconds)
+    async with SessionLocal() as session:
+        obj = WhoopOAuthState(state=state, user_id=user_id, expires_at=expires)
+        session.add(obj)
+        await session.commit()
+
+
+async def verify_whoop_oauth_state(state: str) -> int | None:
+    """Look up and consume a WHOOP OAuth state. Returns user_id or None."""
+    from datetime import datetime as dt
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(WhoopOAuthState).where(WhoopOAuthState.state == state)
+        )
+        obj = result.scalar_one_or_none()
+        if obj is None:
+            return None
+        if obj.expires_at < dt.utcnow():
+            await session.delete(obj)
+            await session.commit()
+            return None
+        user_id = obj.user_id
+        await session.delete(obj)
+        await session.commit()
+        return user_id
 
 
 async def get_or_create_user(

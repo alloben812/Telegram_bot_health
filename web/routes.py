@@ -104,6 +104,7 @@ async def connect_page(
         "connect.html",
         {
             "request": request,
+            "user_id": user_id,
             **status,
             "success": success,
             "error": error,
@@ -149,6 +150,7 @@ async def save_garmin(
             "connect.html",
             {
                 "request": request,
+                "user_id": user_id,
                 **status,
                 "garmin_email": email,
                 "error": f"Не удалось подключиться к Garmin: {exc}",
@@ -172,13 +174,19 @@ async def save_garmin(
 
 @router.get("/auth/whoop")
 async def whoop_auth_start(
+    uid: int = Query(default=0),
     hb_session: str | None = Cookie(default=None),
 ):
     user_id = _get_user_id(hb_session)
+
+    # Fallback: accept uid from query param (link from connect page)
+    if not user_id and uid:
+        user_id = uid
+
     if not user_id:
         return RedirectResponse(url="/connect?error=Сессия+истекла")
 
-    state = generate_whoop_state(user_id)
+    state = await generate_whoop_state(user_id)
     params = urlencode({
         "client_id": config.WHOOP_CLIENT_ID,
         "redirect_uri": config.WHOOP_REDIRECT_URI,
@@ -212,7 +220,16 @@ async def whoop_callback(
             },
         )
 
-    user_id = verify_whoop_state(state)
+    user_id = await verify_whoop_state(state)
+    # Fallback: old Telegram flow sends state=str(user_id)
+    if not user_id:
+        try:
+            candidate = int(state)
+            from database.db import get_user
+            if await get_user(candidate):
+                user_id = candidate
+        except (ValueError, TypeError):
+            pass
     if not user_id:
         return templates.TemplateResponse(
             "result.html",

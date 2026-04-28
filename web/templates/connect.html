@@ -111,7 +111,7 @@
         {% if whoop_connected %}
         <div class="last-sync">Последний синк: {{ whoop_last_sync or 'неизвестно' }}</div>
         {% endif %}
-        <a href="/auth/whoop" class="btn btn-blue" style="display:block; margin-top:12px;">
+        <a href="/auth/whoop?uid={{ user_id }}" class="btn btn-blue" style="display:block; margin-top:12px;">
             {{ 'Переподключить' if whoop_connected else 'Подключить WHOOP' }}
         </a>
         <p class="note">Авторизация через официальный WHOOP OAuth.</p>
