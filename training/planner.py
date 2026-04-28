@@ -45,6 +45,16 @@ _SYSTEM_PROMPT = """\
 Всегда учитывай данные восстановления при рекомендации интенсивности.\
 """
 
+_DAY_NAMES_RU = {
+    0: "Понедельник", 1: "Вторник", 2: "Среда", 3: "Четверг",
+    4: "Пятница", 5: "Суббота", 6: "Воскресенье",
+}
+
+_TRAINING_DAY_LABELS = {
+    "mon": "Пн", "tue": "Вт", "wed": "Ср", "thu": "Чт",
+    "fri": "Пт", "sat": "Сб", "sun": "Вс",
+}
+
 
 @dataclass
 class AthleteContext:
@@ -95,13 +105,49 @@ class AthleteContext:
     # HR zones computed from max_hr in training profile
     hr_zones: Optional[HRZones] = None
 
+    # User profile / goal
+    goal_label: Optional[str] = None
+    goal_distance_km: Optional[float] = None
+    goal_target_time_min: Optional[int] = None
+    available_training_days: Optional[list] = None  # e.g. ["Пн", "Вт", "Чт", "Сб"]
+    max_run_days_per_week: Optional[int] = None
+    strength_days_per_week: Optional[int] = None
+    day_of_week: Optional[str] = None  # e.g. "Понедельник"
+
     # Legacy fields kept for handlers that build context manually
     recent_activities: Optional[list] = None
     weekly_distance_km: Optional[float] = None
     weekly_duration_h: Optional[float] = None
 
     def to_prompt_text(self) -> str:
-        lines = ["### Данные спортсмена\n"]
+        lines = []
+
+        # Athlete profile section (goal, schedule, day of week)
+        profile_lines = []
+        if self.goal_label:
+            profile_lines.append(f"- **Цель:** {self.goal_label}")
+            if self.goal_distance_km:
+                profile_lines.append(f"- **Дистанция цели:** {self.goal_distance_km} км")
+            if self.goal_target_time_min:
+                h, m = divmod(self.goal_target_time_min, 60)
+                time_str = f"{h}:{m:02d}" if h else f"{m} мин"
+                profile_lines.append(f"- **Целевое время:** {time_str}")
+        if self.available_training_days:
+            days_str = ", ".join(self.available_training_days)
+            profile_lines.append(f"- **Дни тренировок:** {days_str} ({len(self.available_training_days)} дней/нед)")
+        if self.max_run_days_per_week is not None:
+            profile_lines.append(f"- **Беговых дней/нед:** {self.max_run_days_per_week}")
+        if self.strength_days_per_week is not None:
+            profile_lines.append(f"- **Силовых дней/нед:** {self.strength_days_per_week}")
+        if self.day_of_week:
+            profile_lines.append(f"- **Сегодня:** {self.day_of_week}")
+
+        if profile_lines:
+            lines.append("### Профиль спортсмена\n")
+            lines.extend(profile_lines)
+            lines.append("")
+
+        lines.append("### Данные спортсмена\n")
 
         if self.whoop_recovery_score is not None:
             lines.append(f"- **WHOOP Восстановление:** {self.whoop_recovery_score}%")
@@ -348,6 +394,27 @@ class TrainingPlanner:
 Ты — элитный тренер по выносливости. Анализируй данные спортсмена и возвращай \
 рекомендацию СТРОГО в виде JSON-объекта без markdown-обёртки и без пояснений вне JSON.
 
+ПРАВИЛА ПРИНЯТИЯ РЕШЕНИЙ:
+1. ОТДЫХ обязателен если: WHOOP Recovery < 33% ИЛИ Garmin Body Battery < 25 ИЛИ \
+   недосып за 7 дней > 10 ч ИЛИ Garmin Training Readiness < 30.
+2. ЛЁГКАЯ тренировка если: Recovery 33–55% ИЛИ Body Battery 25–45 ИЛИ тренд \
+   восстановления "declining".
+3. Если за последние 4 дня было 3+ тренировки — рекомендуй восстановительную или кросс-тренинг.
+4. Учитывай ЦЕЛЬ спортсмена: бегуну на 10К нужны темповые и интервальные работы; \
+   марафонцу — длинные Z2 забеги; общий фитнес — разнообразие.
+5. Учитывай ДЕНЬ НЕДЕЛИ: варьируй нагрузку по дням (не одно и то же каждый день). \
+   В дни силовых — рекомендуй силовую; в выходные — длинную тренировку.
+6. HR ЗОНЫ: если в данных есть пульсовые зоны спортсмена, используй ТОЛЬКО ИХ \
+   конкретные диапазоны в target_hr_range. Никогда не выдумывай пульсовые значения.
+7. В reasoning ссылайся на КОНКРЕТНЫЕ ЦИФРЫ из данных (например: "HRV 48 мс — \
+   на 5 мс выше среднего за 7 дней", "3 беговые за 4 дня — нужен отдых").
+8. readiness_score должен коррелировать с Recovery и Training Readiness \
+   (Recovery 80+ → readiness 70+; Recovery < 33% → readiness < 40).
+9. confidence: "high" если есть WHOOP + Garmin + профиль; "medium" если один источник \
+   отсутствует; "low" если данных минимально.
+10. data_gaps: перечисли конкретно что отсутствует (Garmin Training Readiness, \
+    профиль спортсмена, HR зоны и т.д.).
+
 Схема JSON:
 {
   "readiness_score": <0-100>,
@@ -368,14 +435,12 @@ class TrainingPlanner:
       }
     ]
   },
-  "reasoning": ["<факт 1>", "<факт 2>"],
+  "reasoning": ["<факт 1 с конкретными цифрами>", "<факт 2>"],
   "avoid": ["<чего избегать 1>"],
   "control": ["<сигнал для остановки 1>"],
   "confidence": "<low|medium|high>",
   "data_gaps": ["<чего не хватает для полного анализа>"]
-}
-
-Если данных недостаточно — снижай confidence и заполняй data_gaps.\
+}\
 """
 
         user_prompt = context.to_prompt_text()
