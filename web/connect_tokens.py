@@ -17,15 +17,18 @@ async def generate_connect_url(user_id: int) -> str:
 
 
 def generate_whoop_state(user_id: int) -> str:
-    """Create HMAC-signed state for WHOOP OAuth callback."""
+    """Create HMAC-signed state for WHOOP OAuth callback.
+
+    Uses '.' as separator (not ':') because WHOOP truncates state at colons.
+    """
     msg = str(user_id).encode()
     sig = hmac.new(config.SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
-    return f"{user_id}:{sig}"
+    return f"{user_id}.{sig}"
 
 
 def verify_whoop_state(state: str) -> int | None:
     """Verify HMAC-signed state. Returns user_id or None."""
-    parts = state.split(":", 1)
+    parts = state.split(".", 1)
     if len(parts) != 2:
         return None
     user_id_str, sig = parts
