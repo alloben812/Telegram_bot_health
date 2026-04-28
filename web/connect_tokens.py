@@ -2,6 +2,7 @@ from __future__ import annotations
 
 """Connect token generation and WHOOP OAuth state signing."""
 
+import base64
 import hashlib
 import hmac
 
@@ -19,16 +20,22 @@ async def generate_connect_url(user_id: int) -> str:
 def generate_whoop_state(user_id: int) -> str:
     """Create HMAC-signed state for WHOOP OAuth callback.
 
-    Uses '.' as separator (not ':') because WHOOP truncates state at colons.
+    Encodes as URL-safe base64 to avoid WHOOP truncating on special chars.
+    Format inside base64: ``user_id:hmac_hex``
     """
     msg = str(user_id).encode()
     sig = hmac.new(config.SECRET_KEY.encode(), msg, hashlib.sha256).hexdigest()
-    return f"{user_id}.{sig}"
+    raw = f"{user_id}:{sig}"
+    return base64.urlsafe_b64encode(raw.encode()).decode()
 
 
 def verify_whoop_state(state: str) -> int | None:
     """Verify HMAC-signed state. Returns user_id or None."""
-    parts = state.split(".", 1)
+    try:
+        raw = base64.urlsafe_b64decode(state.encode()).decode()
+    except Exception:
+        return None
+    parts = raw.split(":", 1)
     if len(parts) != 2:
         return None
     user_id_str, sig = parts
