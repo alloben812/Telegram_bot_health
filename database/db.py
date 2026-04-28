@@ -336,10 +336,12 @@ async def save_whoop_workouts(user_id: int, workouts: list[dict]) -> int:
 
             score = w.get("score") or {}  # score can be null for unscored workouts
             # v2 API provides sport_name directly; v1 used sport_id
-            sport_name = (
+            from training.sports import normalize_sport
+            raw_sport = (
                 w.get("sport_name")
                 or _whoop_sport_from_id(w.get("sport_id", -1))
             )
+            sport_name = normalize_sport(raw_sport)
 
             start_str = w.get("start", "")
             act_date = start_str[:10] if start_str else ""
@@ -393,33 +395,6 @@ async def save_garmin_activities(user_id: int, activities: list[dict]) -> int:
     if not activities:
         return 0
 
-    _GARMIN_SPORT_MAP = {
-        "running": "running",
-        "trail_running": "running",
-        "treadmill_running": "running",
-        "cycling": "cycling",
-        "road_biking": "cycling",
-        "mountain_biking": "cycling",
-        "indoor_cycling": "cycling",
-        "open_water_swimming": "swimming",
-        "lap_swimming": "swimming",
-        "strength_training": "strength",
-        "indoor_cardio": "functional_fitness",
-        "hiit": "hiit",
-        "yoga": "yoga",
-        "pilates": "pilates",
-        "rowing": "rowing",
-        "indoor_rowing": "rowing",
-        "triathlon": "triathlon",
-        "walking": "walking",
-        "hiking": "hiking",
-        "tennis": "tennis",
-        "boxing": "boxing",
-        "cross_training": "functional_fitness",
-        "resort_skiing_snowboarding": "ski",
-        "skiing": "ski",
-    }
-
     inserted = 0
     async with SessionLocal() as session:
         for a in activities:
@@ -437,12 +412,13 @@ async def save_garmin_activities(user_id: int, activities: list[dict]) -> int:
             if result.scalar_one_or_none():
                 continue
 
+            from training.sports import normalize_sport
             raw_sport = (
                 a.get("activityType", {}).get("typeKey", "activity")
                 if isinstance(a.get("activityType"), dict)
                 else "activity"
             )
-            sport = _GARMIN_SPORT_MAP.get(raw_sport, raw_sport)
+            sport = normalize_sport(raw_sport)
 
             start_str = a.get("startTimeLocal") or a.get("startTimeGMT") or ""
             act_date = start_str[:10] if start_str else ""
@@ -508,6 +484,17 @@ async def get_recent_activities(
         if source:
             q = q.where(Activity.source == source)
         result = await session.execute(q)
+        return list(result.scalars().all())
+
+
+async def get_activities_for_date(user_id: int, activity_date: str) -> list[Activity]:
+    """Return all activities for a specific date."""
+    async with SessionLocal() as session:
+        result = await session.execute(
+            select(Activity)
+            .where(Activity.user_id == user_id, Activity.activity_date == activity_date)
+            .order_by(Activity.created_at.desc())
+        )
         return list(result.scalars().all())
 
 
@@ -715,7 +702,7 @@ async def get_recent_recommendations(
 async def save_workout_completion(
     planned_workout_id: int,
     user_id: int,
-    completion_status: str,  # done|skipped
+    completion_status: str,  # done|skipped|auto_detected
     comment: str | None = None,
 ) -> WorkoutCompletion:
     async with SessionLocal() as session:
@@ -726,6 +713,18 @@ async def save_workout_completion(
             comment=comment,
         )
         session.add(completion)
+        # Also update the planned workout status
+        result = await session.execute(
+            select(PlannedWorkoutRecord).where(
+                PlannedWorkoutRecord.id == planned_workout_id
+            )
+        )
+        planned = result.scalar_one_or_none()
+        if planned and planned.status == "proposed":
+            if completion_status in ("done", "auto_detected"):
+                planned.status = "completed"
+            elif completion_status == "skipped":
+                planned.status = "skipped"
         await session.commit()
         await session.refresh(completion)
         return completion

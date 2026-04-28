@@ -31,6 +31,7 @@ from database.db import (
 )
 from training.hr_zones import compute_hr_zones
 from training.planner import AthleteContext, planner
+from training.sports import merge_activities, normalize_sport
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,8 @@ _INTENSITY_LABELS = {
 
 _SPORT_EMOJI = {
     "run": "🏃", "bike": "🚴", "swim": "🏊", "strength": "💪",
-    "walk": "🚶", "mobility": "🧘", "recovery": "💆", "rest": "😴", "other": "🏋️",
+    "hiit": "🔥", "walk": "🚶", "mobility": "🧘", "recovery": "💆",
+    "rest": "😴", "other": "🏋️",
 }
 
 
@@ -84,18 +86,48 @@ def _build_context(snapshots: list, activities: list, profile=None) -> AthleteCo
             if snap.garmin_active_calories is not None and ctx.garmin_active_calories is None:
                 ctx.garmin_active_calories = snap.garmin_active_calories
 
-    if len(snapshots) >= 7:
-        hrv_vals = [s.whoop_hrv_ms for s in snapshots if s.whoop_hrv_ms]
+    # 7-day averages and trends (use up to 7 most recent snapshots)
+    recent_7 = snapshots[:7]
+    if len(recent_7) >= 2:
+        hrv_vals = [s.whoop_hrv_ms for s in recent_7 if s.whoop_hrv_ms]
         if hrv_vals:
             ctx.hrv_7d_avg = round(sum(hrv_vals) / len(hrv_vals), 1)
-        sleep_vals = [s.whoop_sleep_performance for s in snapshots if s.whoop_sleep_performance]
+        sleep_vals = [s.whoop_sleep_performance for s in recent_7 if s.whoop_sleep_performance]
         if sleep_vals:
             ctx.sleep_7d_avg = round(sum(sleep_vals) / len(sleep_vals), 1)
 
+        # Recovery trend: avg of last 3 days vs previous 4
+        rec_vals = [s.whoop_recovery_score for s in recent_7 if s.whoop_recovery_score is not None]
+        if len(rec_vals) >= 4:
+            recent_avg = sum(rec_vals[:3]) / 3
+            older_avg = sum(rec_vals[3:]) / len(rec_vals[3:])
+            diff = recent_avg - older_avg
+            if diff > 5:
+                ctx.recovery_trend = "improving"
+            elif diff < -5:
+                ctx.recovery_trend = "declining"
+            else:
+                ctx.recovery_trend = "stable"
+
+        # Strain averages
+        strain_vals = [s.whoop_strain for s in recent_7 if s.whoop_strain is not None]
+        if strain_vals:
+            ctx.strain_7d_avg = round(sum(strain_vals) / len(strain_vals), 1)
+            ctx.weekly_strain_total = round(sum(strain_vals), 1)
+
+        # Sleep debt: sum of (actual - 8h) over 7 days
+        sleep_durations = [s.whoop_sleep_duration_h for s in recent_7 if s.whoop_sleep_duration_h is not None]
+        if sleep_durations:
+            debt = sum(d - 8.0 for d in sleep_durations)
+            ctx.sleep_debt_h = round(debt, 1)
+
     if activities:
+        # Deduplicate Garmin+WHOOP activities for the same workout
+        activities = merge_activities(activities)
+
         today_str = date.today().isoformat()
         ctx.completed_today = list({
-            a.sport for a in activities if a.activity_date == today_str
+            normalize_sport(a.sport) for a in activities if a.activity_date == today_str
         })
 
         # Weekly load
@@ -103,7 +135,7 @@ def _build_context(snapshots: list, activities: list, profile=None) -> AthleteCo
         week_acts = [a for a in activities if a.activity_date >= cutoff]
         load: dict = {}
         for a in week_acts:
-            sport = a.sport
+            sport = normalize_sport(a.sport)
             if sport not in load:
                 load[sport] = {"count": 0, "duration_min": 0, "distance_km": 0.0}
             load[sport]["count"] += 1
@@ -126,12 +158,12 @@ def _build_context(snapshots: list, activities: list, profile=None) -> AthleteCo
 
         ctx.recent_activities_db = [
             {
-                "sport": a.sport,
+                "sport": normalize_sport(a.sport),
                 "date": a.activity_date,
                 "duration_min": int(a.duration_s / 60) if a.duration_s else None,
                 "distance_km": round(a.distance_m / 1000, 1) if a.distance_m else None,
                 "avg_hr": a.avg_hr,
-                "whoop_strain": a.whoop_strain,
+                "whoop_strain": getattr(a, "whoop_strain", None),
             }
             for a in activities[:10]
         ]

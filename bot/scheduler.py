@@ -114,13 +114,62 @@ async def _do_sync(user_id: int) -> tuple[bool, list[str]]:
 # ------------------------------------------------------------------ #
 
 async def job_silent_sync(context: ContextTypes.DEFAULT_TYPE) -> None:
+    from database.db import (
+        get_activities_for_date,
+        get_planned_workout,
+        save_workout_completion,
+    )
+    from training.sports import normalize_sport
+
     user_id = config.ADMIN_TELEGRAM_ID
+    today = date.today().isoformat()
     logger.info("Silent sync starting for user %d", user_id)
+
+    # Snapshot activities before sync
+    before = await get_activities_for_date(user_id, today)
+    before_ids = {a.external_id for a in before}
+
     saved, errors = await _do_sync(user_id)
     if errors:
         logger.warning("Silent sync finished with errors: %s", errors)
     else:
         logger.info("Silent sync OK, data_saved=%s", saved)
+
+    # Check for new activities detected after sync
+    after = await get_activities_for_date(user_id, today)
+    new_activities = [a for a in after if a.external_id not in before_ids]
+
+    if new_activities:
+        planned = await get_planned_workout(user_id, today)
+        for act in new_activities:
+            sport = normalize_sport(act.sport)
+            dur_min = int(act.duration_s / 60) if act.duration_s else None
+            strain_str = f" (strain {act.whoop_strain:.1f})" if act.whoop_strain else ""
+            dur_str = f" {dur_min} мин" if dur_min else ""
+
+            from training.planner import _SPORT_LABELS
+            sport_label = _SPORT_LABELS.get(sport, sport)
+            emoji = {"run": "🏃", "bike": "🚴", "swim": "🏊", "strength": "💪",
+                     "hiit": "🔥", "walk": "🚶", "mobility": "🧘"}.get(sport, "🏋️")
+
+            msg = f"{emoji} Обнаружена тренировка: {sport_label}{dur_str}{strain_str}"
+
+            # Auto-complete planned workout if sport matches
+            if planned and planned.status == "proposed":
+                planned_sport = normalize_sport(planned.sport)
+                if planned_sport == sport:
+                    await save_workout_completion(
+                        planned_workout_id=planned.id,
+                        user_id=user_id,
+                        completion_status="auto_detected",
+                    )
+                    msg += "\n✅ Рекомендация на сегодня выполнена!"
+                    logger.info("Auto-completed planned workout %d for user %d", planned.id, user_id)
+
+            try:
+                await context.bot.send_message(chat_id=user_id, text=msg)
+            except Exception as exc:
+                logger.warning("Failed to send workout notification: %s", exc)
 
 
 # ------------------------------------------------------------------ #
