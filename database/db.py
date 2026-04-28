@@ -27,15 +27,20 @@ def _make_engine():
     import re
     url = config.DATABASE_URL
     kwargs: dict = {"echo": False}
-    # asyncpg does not accept sslmode — strip it and pass ssl via connect_args
-    if "asyncpg" in url and "sslmode" in url:
+
+    needs_ssl = "sslmode" in url
+    if needs_ssl:
         url = re.sub(r"[?&]sslmode=[^&]*", "", url)
-        # Restore leading '?' if query params remain after stripping
         if "&" in url and "?" not in url.split("/")[-1]:
             url = url.replace("&", "?", 1)
         import ssl as _ssl
         kwargs["connect_args"] = {"ssl": _ssl.create_default_context()}
-    logger.info("DB engine URL (masked): %s...%s", url[:30], url[-10:])
+
+    # Ensure async driver for postgresql
+    if url.startswith("postgresql://"):
+        url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    print(f"[DB] url={url[:35]}*** ssl={needs_ssl}", flush=True)
     return create_async_engine(url, **kwargs)
 
 engine = _make_engine()
