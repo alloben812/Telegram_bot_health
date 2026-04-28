@@ -23,7 +23,12 @@ from security import decrypt, decrypt_json, encrypt, encrypt_json
 
 logger = logging.getLogger(__name__)
 
-engine = create_async_engine(config.DATABASE_URL, echo=False)
+_engine_kwargs: dict = {"echo": False}
+if config.DATABASE_NEEDS_SSL:
+    import ssl as _ssl
+    _ctx = _ssl.create_default_context()
+    _engine_kwargs["connect_args"] = {"ssl": _ctx}
+engine = create_async_engine(config.DATABASE_URL, **_engine_kwargs)
 SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
