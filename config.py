@@ -1,7 +1,12 @@
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
+# Local .env first, then Render Secret File as fallback
 load_dotenv()
+_render_env = Path("/etc/secrets/.env")
+if _render_env.exists():
+    load_dotenv(_render_env, override=False)
 
 
 class Config:
