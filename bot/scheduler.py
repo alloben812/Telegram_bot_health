@@ -69,6 +69,15 @@ async def _do_sync(user_id: int) -> tuple[bool, list[str]]:
         garmin_data["_activities"] = today_acts
         if today_acts:
             await save_garmin_activities(user_id, today_acts)
+        # Fetch training readiness and body battery (extra API calls)
+        try:
+            garmin_data["_training_readiness"] = await gc.get_training_readiness(today)
+        except Exception:
+            pass
+        try:
+            garmin_data["_body_battery"] = await gc.get_body_battery(today)
+        except Exception:
+            pass
         logger.info("Scheduled Garmin sync OK for user %d", user_id)
     except Exception as exc:
         logger.warning("Scheduled Garmin sync error for user %d: %s", user_id, exc)

@@ -29,8 +29,9 @@ from database.db import (
     save_daily_recommendation,
     save_workout_completion,
 )
+from training.goals import GOAL_PRESETS
 from training.hr_zones import compute_hr_zones
-from training.planner import AthleteContext, planner
+from training.planner import AthleteContext, _DAY_NAMES_RU, _TRAINING_DAY_LABELS, planner
 from training.sports import merge_activities, normalize_sport
 
 logger = logging.getLogger(__name__)
@@ -60,6 +61,31 @@ def _build_context(snapshots: list, activities: list, profile=None) -> AthleteCo
     # HR zones from user profile
     if profile and profile.max_hr:
         ctx.hr_zones = compute_hr_zones(profile.max_hr)
+
+    # User profile: goal, training days, schedule
+    if profile:
+        if profile.active_goal_key:
+            preset = GOAL_PRESETS.get(profile.active_goal_key)
+            if preset:
+                ctx.goal_label = preset.label
+                ctx.goal_distance_km = preset.distance_km
+                ctx.goal_target_time_min = preset.target_time_minutes
+        if profile.available_training_days:
+            import json as _json
+            try:
+                raw_days = _json.loads(profile.available_training_days) if isinstance(
+                    profile.available_training_days, str
+                ) else profile.available_training_days
+                ctx.available_training_days = [
+                    _TRAINING_DAY_LABELS.get(d, d) for d in raw_days
+                ]
+            except (ValueError, TypeError):
+                pass
+        ctx.max_run_days_per_week = profile.max_run_days_per_week
+        ctx.strength_days_per_week = profile.strength_days_per_week
+
+    # Day of week (for periodization)
+    ctx.day_of_week = _DAY_NAMES_RU.get(date.today().weekday())
 
     if snapshots:
         today_snap = snapshots[0]

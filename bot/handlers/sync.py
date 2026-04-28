@@ -189,6 +189,15 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             garmin_data["_activities"] = today_acts
             if today_acts:
                 await save_garmin_activities(user_id, today_acts)
+            # Fetch training readiness and body battery (extra API calls)
+            try:
+                garmin_data["_training_readiness"] = await gc.get_training_readiness(today)
+            except Exception:
+                pass
+            try:
+                garmin_data["_body_battery"] = await gc.get_body_battery(today)
+            except Exception:
+                pass
         except Exception as exc:
             logger.error("Garmin sync error: %s", exc)
             errors.append(f"⌚ Garmin: {_format_garmin_error(exc)}")
@@ -239,13 +248,29 @@ async def sync_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         stress = garmin_data.get("averageStressLevel", "—")
         today_acts = garmin_data.get("_activities", [])
         steps_fmt = f"{steps:,}" if isinstance(steps, int) else str(steps)
-        lines.append(
-            "⌚ *Garmin сегодня:*\n"
-            f"  Шаги: {steps_fmt}\n"
-            f"  Активные ккал: {cal}\n"
-            f"  Средний стресс: {stress}\n"
-            f"  Тренировок сегодня: {len(today_acts)}\n"
-        )
+
+        # Training readiness and body battery
+        tr_data = garmin_data.get("_training_readiness") or {}
+        tr_score = tr_data.get("score") or tr_data.get("trainingReadiness")
+        bb_data = garmin_data.get("_body_battery") or []
+        bb_score = None
+        if bb_data and isinstance(bb_data, list):
+            last_bb = bb_data[-1] if bb_data else {}
+            bb_score = last_bb.get("bodyBatteryLevel") or last_bb.get("charged")
+
+        garmin_lines = [
+            "⌚ *Garmin сегодня:*",
+            f"  Шаги: {steps_fmt}",
+            f"  Активные ккал: {cal}",
+            f"  Средний стресс: {stress}",
+        ]
+        if tr_score is not None:
+            garmin_lines.append(f"  Готовность: {tr_score}/100")
+        if bb_score is not None:
+            garmin_lines.append(f"  Body Battery: {bb_score}/100")
+        garmin_lines.append(f"  Тренировок сегодня: {len(today_acts)}")
+        lines.append("\n".join(garmin_lines) + "\n")
+
         weekly = garmin_data.get("_weekly", {})
         if weekly:
             lines.append(

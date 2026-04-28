@@ -273,6 +273,21 @@ async def upsert_daily_snapshot(
             snapshot.garmin_steps = garmin_data.get("totalSteps")
             snapshot.garmin_active_calories = garmin_data.get("activeKilocalories")
             snapshot.garmin_stress_avg = garmin_data.get("averageStressLevel")
+
+            # Training Readiness (from separate API call)
+            tr_data = garmin_data.get("_training_readiness") or {}
+            tr_score = tr_data.get("score") or tr_data.get("trainingReadiness")
+            if tr_score is not None:
+                snapshot.garmin_training_readiness = int(tr_score)
+
+            # Body Battery (time series — take last value)
+            bb_data = garmin_data.get("_body_battery") or []
+            if bb_data and isinstance(bb_data, list):
+                last_bb = bb_data[-1] if bb_data else {}
+                bb_val = last_bb.get("bodyBatteryLevel") or last_bb.get("charged")
+                if bb_val is not None:
+                    snapshot.garmin_body_battery_end = int(bb_val)
+
             # Encrypt raw Garmin payload before storing
             snapshot.raw_garmin_enc = encrypt_json(garmin_data)
 
