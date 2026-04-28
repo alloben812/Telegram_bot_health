@@ -150,8 +150,10 @@ venv/bin/python scripts/check_baseline.py
 | Phase 0 | ✅ Merged (PR #8, #9) | Baseline hygiene |
 | Phase 1 | ✅ Merged (PR #13) | AIProvider abstraction, OpenAI, Pydantic schemas |
 | Phase 2 | ✅ Merged (PR #14) | Data models (Profile, Recommendation, WorkoutCompletion) |
-| Phase 3 | 🟡 PR #15 | Telegram MVP: онбординг, Сегодня, История, Профиль |
-| Phase 4 | ⬜ Planned | Sync & Recommendation Engine |
-| Phase 5 | ⬜ Planned | Web Connect UI |
-| Phase 6 | ⬜ Planned | Webhook & Render deployment |
-| Phase 7 | ⬜ Planned | Hardening |
+| Phase 3 | ✅ Merged (PR #15, #16) | Telegram MVP: онбординг, Сегодня, История, Профиль |
+| Phase 4 | ✅ Merged (PR #17) | Проактивный push 07:00, авто-синк 4x/день, HR зоны |
+| **Pre-Phase 5** | ⏳ Manual | Render + Neon + WHOOP redirect URI (см. ROADMAP.md) |
+| Phase 5 | ⬜ Planned | FastAPI + Web Connect UI (Garmin, WHOOP OAuth) |
+| Phase 6 | ⬜ Planned | Деплой: Render + Neon Postgres + webhook + GitHub Actions |
+| Phase 7 | ⬜ Planned | AI quality: коррекция рекомендации, prompt-тюнинг |
+| Phase 8 | ⬜ Planned | Hardening: логи, мониторинг, тесты |

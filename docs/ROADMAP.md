@@ -129,23 +129,58 @@ Verification:
 - Garmin `429` does not trigger aggressive retry loops.
 - A workout detected after the morning recommendation can trigger a correction.
 
+## Pre-requisites before Phase 5
+
+These must be completed manually before Phase 5 code can be written or tested.
+Phase 5 requires a public HTTPS URL for WHOOP OAuth redirect and a production database.
+
+### 1. Render — web hosting
+
+- Register at [render.com](https://render.com) (free tier is sufficient for MVP).
+- Create a Web Service connected to the GitHub repo.
+- Note the assigned URL: `https://<your-app>.onrender.com`
+- Do not deploy yet — Render config (`render.yaml`) will be added in Phase 6.
+
+### 2. Neon — production Postgres
+
+- Register at [neon.tech](https://neon.tech) (free tier is sufficient for MVP).
+- Create a new project.
+- Copy the connection string (`postgresql://...`) — this becomes `DATABASE_URL` in production.
+
+### 3. WHOOP developer app — update redirect URI
+
+- Go to [developer.whoop.com](https://developer.whoop.com) → your app settings.
+- Add or update the Redirect URI to: `https://<your-app>.onrender.com/auth/whoop/callback`
+- The old local/ngrok redirect URI can be kept alongside it for local testing.
+
+### 4. Domain (optional for MVP)
+
+- The `*.onrender.com` domain is sufficient for WHOOP OAuth and MVP Web Connect UI.
+- A custom domain can be added to Render later without code changes.
+
+---
+
 ## Phase 5 - Web Connect UI
 
 Goal: move sensitive connection flows out of regular Telegram dialogs.
+Requires: Pre-requisites above completed (Render URL known, Neon DATABASE_URL ready, WHOOP redirect URI updated).
 
 Tasks:
 
-1. Add one-time connect token model and service.
-2. Add Connect button that generates a web link.
-3. Add minimal Web Connect UI with Garmin and WHOOP cards.
-4. Add WHOOP OAuth callback through web backend.
-5. Add Garmin token/session-first connection handling.
+1. Add FastAPI app entrypoint alongside the existing polling bot.
+2. Add one-time connect token model and service.
+3. Add Connect button in Telegram that generates a web link.
+4. Add minimal Web Connect UI with Garmin and WHOOP cards.
+5. Add WHOOP OAuth callback endpoint through web backend.
+6. Add Garmin token/session-first connection handling via web.
 
 Verification:
 
+- FastAPI app starts locally alongside polling bot.
 - Connect links expire and cannot be reused incorrectly.
 - Integration statuses show connected/not connected/error/last sync.
 - Tokens/credentials are encrypted.
+- WHOOP OAuth flow completes end-to-end with real redirect URI.
 
 ## Phase 6 - Webhook and Deployment MVP
 
